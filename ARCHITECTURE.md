@@ -20,28 +20,37 @@ AWS credentials.
 EventBridge (schedule)
    │
    ▼
-[Ingest Lambdas]  → No reason to pick just one source — this step is a
-   │                 fan-in, and Dedup right below already exists to
-   │                 collapse overlap, so the marginal cost of one more
-   │                 source is roughly one more Lambda, not a redesign.
-   │                 Run every source that clears a cost/value bar in
-   │                 parallel: one or more commercial job-aggregator APIs
-   │                 (candidates: fantastic.jobs, theirstack.com — cost,
-   │                 ToS, and how much their coverage actually overlaps
-   │                 vs. complements each other are all unverified, next
-   │                 research task, and "how much do multiple actually
-   │                 overlap" is itself a reason to run more than one
-   │                 rather than a reason to pick one), each indexing
-   │                 postings across thousands of companies on
-   │                 Greenhouse/Lever/Ashby/Workday through one endpoint;
-   │                 plus direct per-company polling of Greenhouse's
-   │                 official free API (GET /v1/boards/{company}/jobs —
-   │                 genuinely per-company only, confirmed 2026-09-01,
-   │                 this is the one source that does need a company
-   │                 list) for a small hand-picked watchlist Matt wants
-   │                 faster-than-aggregator alerts on. HiringCafe ruled
-   │                 out as a source entirely — no official API,
-   │                 scraping-only, confirmed 2026-09-01.
+[Ingest Lambdas]  → Fan-in from every source that clears a cost/value bar;
+   │                 Dedup right below already exists to collapse overlap,
+   │                 so adding a source costs roughly one more Lambda, not
+   │                 a redesign. Confirmed 2026-09-01, within Matt's
+   │                 $50/mo aggregator budget:
+   │                 FREE, run all of these — Himalayas (no auth, remote
+   │                 by construction, filterable by keyword/seniority/
+   │                 salary/timezone), RemoteOK (remoteok.com/api,
+   │                 official), Remotive (remotive.com/api/remote-jobs,
+   │                 official — personal use is fine, its ToS only
+   │                 forbids redistributing to other job boards),
+   │                 Arbeitnow, Jobicy, and theirstack.com's free tier
+   │                 (200 API credits/mo, rolls over) for broader
+   │                 Greenhouse/Lever/Ashby coverage beyond remote-native
+   │                 boards. Total cost: $0 — spend nothing until this
+   │                 combo's actual volume/coverage over a few weeks
+   │                 proves insufficient.
+   │                 PAID, held in reserve, not subscribed yet —
+   │                 theirstack.com's first paid tier ($59/mo, $9 over
+   │                 ceiling — small stretch, ask before paying) or
+   │                 fantastic.jobs ($95/mo official, over ceiling; a
+   │                 ~$1/1,000-job pay-per-use option exists via RapidAPI
+   │                 that could stay under $50 with volume capped, but
+   │                 needs active usage monitoring — more moving parts).
+   │                 RULED OUT — HiringCafe (no official API, scraping-
+   │                 only). Also: direct per-company polling of
+   │                 Greenhouse's official free API (per-company only,
+   │                 no cross-company search — confirmed 2026-09-01,
+   │                 this is the one source that needs a company list) for
+   │                 a small hand-picked watchlist Matt wants
+   │                 faster-than-aggregator alerts on.
    ▼
 [Dedup + Filter]  → DynamoDB "seen postings" table; title regex; **remote
    │                 only — hard filter, not a scoring factor** (checked
@@ -299,10 +308,11 @@ than either silently shipping it or silently discarding it.
 
 1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
    Secrets Manager, S3/DynamoDB tables.
-2. **Ingestion** — evaluate the commercial job-aggregator APIs (coverage,
-   pricing, ToS, overlap between them); connectors for every one that
-   clears the cost/value bar, not just the best single one; optional small
-   watchlist + direct-polling connector; dedup/filter logic.
+2. **Ingestion** — connectors for the five free remote-board APIs +
+   theirstack.com free tier (§1, settled 2026-09-01, $0); optional small
+   watchlist + direct-polling connector; dedup/filter logic. Revisit a
+   paid aggregator tier only if this combo's real volume/coverage proves
+   insufficient.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
 4. **Generation** — lane-specific structured-content rewrite (§1) against
    the accomplishment inventory.
@@ -319,9 +329,9 @@ than either silently shipping it or silently discarding it.
 
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
-- One or more job-aggregator API subscriptions (see §1) — the real blocker
-  is researching coverage/pricing/ToS for each and deciding which combo is
-  worth the combined monthly cost, not narrowing to a single winner.
+- ~~Job-aggregator API subscriptions~~ — **settled 2026-09-01, $0/mo**:
+  five free remote-board APIs plus theirstack.com's free tier (see §1).
+  $50/mo ceiling held in reserve, not spent, pending real volume data.
 - Optional: a small hand-picked watchlist for direct high-freshness
   polling — see `target-employer-list.md`, demoted from primary mechanism
   to this secondary role 2026-09-01; needs pruning to a much shorter list
