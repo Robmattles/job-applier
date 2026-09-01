@@ -195,14 +195,36 @@ operates on the whole assembled document *against the actual posting*,
 roleplaying a skeptical recruiter or ATS keyword screen rather than an
 editor. This is the "act as a skeptical hiring manager" evidence-audit
 idea from the original job-search strategy, formalized as a pipeline stage
-instead of a one-off prompt. It produces:
+instead of a one-off prompt.
+
+**Hard rule: every finding must trace to a specific line in the posting.**
+Not a generic resume-best-practices audit — a JD-relevance filter comes
+first. A weakness that's true in the abstract ("no dollar-impact figure
+anywhere") doesn't count unless it maps to something the posting actually
+asks for, and the finding has to name which line. Caught in the first dry
+run doing this loosely: "no dollar-value business-impact figure" got
+flagged as a generic recruiter concern rather than tied to the JD's actual
+"comfortable communicating findings and trade-offs to non-technical
+stakeholders and leadership" line — a real connection, but it should have
+been stated as that connection, not asserted as a universal truth. Worse,
+that looseness let a real miss slide through: mentoring (a *nice-to-have*
+line) got fixed, but stakeholder/leadership communication (a *required*
+line, and a different ask than mentoring) did not — because the two got
+bundled into one finding instead of checked as the two separate
+requirements they are. Precision here matters as much as recall: sloppy
+JD-mapping produces both false-positive findings (flagged but not actually
+what the posting cares about) and false negatives (a real required-line
+gap hiding behind a bundled, imprecise one).
+
+It produces:
 - The 5 strongest reasons to interview, grounded in what's actually on the
   page (sanity-checks that the strongest evidence actually made the cut)
-- The 3 most likely reasons to reject — JD requirements with no visible
-  coverage, a seniority/title signal that reads wrong, a narrative gap
-- Anything the JD explicitly asks for that the résumé is silent on, even
-  if the accomplishment inventory has evidence for it elsewhere that
-  simply didn't get selected this time
+- The 3 most likely reasons to reject — each one naming the specific JD
+  line it fails to satisfy, required lines checked separately from
+  nice-to-haves rather than lumped together
+- Every required (not nice-to-have) JD line cross-checked individually
+  against the résumé, even ones that feel adjacent to something already
+  covered — adjacent isn't the same as covered
 - Basic ATS-parseability sanity checks (consistent date formats, no
   tables/columns/graphics, standard section headers) — a real but
   usually-already-satisfied check given the fixed single-column template
