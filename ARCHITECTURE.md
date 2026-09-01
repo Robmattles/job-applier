@@ -55,12 +55,31 @@ EventBridge (schedule)
    │                 official per-company endpoints. Ashby exposes a clean
    │                 `isRemote` boolean (more reliable than string-
    │                 matching "remote" in a location field, which is all
-   │                 Greenhouse/Lever expose). This is the one source that
-   │                 needs a curated company list — see
-   │                 `target-employer-list.md`, now worth actually
-   │                 building out rather than treated as optional, since
-   │                 testing (not assumption) is what justifies it this
-   │                 time.
+   │                 Greenhouse/Lever expose).
+   │                 The company list itself is NOT hand-maintained —
+   │                 confirmed 2026-09-01 by testing two `site:` search
+   │                 queries (`site:job-boards.greenhouse.io "Senior Data
+   │                 Scientist" remote`, `site:jobs.ashbyhq.com "Machine
+   │                 Learning Engineer" remote`) against the same three ATS
+   │                 URL patterns: they surfaced Medium, ecoATM, Veeam,
+   │                 Quanata (auto-insurance telematics — direct domain
+   │                 fit), Cogstate, Pipe Technologies, Northbeam, AG1,
+   │                 Zencastr, Quora, Canals — none of which were on the
+   │                 hand-picked list, because none of them are companies
+   │                 Claude happened to think of from training knowledge.
+   │                 That's the actual argument against a static list: it's
+   │                 capped by what one person (or one model) remembers,
+   │                 and the long tail is exactly where a lot of real
+   │                 openings are. So: a scheduled Lambda runs `site:`
+   │                 searches per ATS platform × target title on a
+   │                 rotation, parses result URLs for new board tokens
+   │                 (the company slug is embedded in the URL path), and
+   │                 adds them to a DynamoDB "known companies" table that
+   │                 the direct-polling connector reads from — the list
+   │                 grows itself continuously instead of being maintained
+   │                 by hand. `target-employer-list.md`'s 19 live-tested
+   │                 companies seed that table on day one; nothing more
+   │                 needs to be manually added to it going forward.
    │                 STILL UNKNOWN, lower priority now — theirstack.com's
    │                 free tier (200 API credits/mo) requires an account
    │                 neither of us has created; given how well $0 direct
@@ -343,9 +362,11 @@ than either silently shipping it or silently discarding it.
 1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
    Secrets Manager, S3/DynamoDB tables.
 2. **Ingestion** — connectors for direct Greenhouse/Lever/Ashby polling
-   against `target-employer-list.md` (primary, live-tested strongest) plus
-   Himalayas + Jobicy (verified strong) and RemoteOK (verified per-tag
-   only); dedup/filter logic; theirstack.com stays a lower-priority maybe.
+   (primary, live-tested strongest), seeded from `target-employer-list.md`
+   but grown continuously by the `site:` search-discovery Lambda (§1) —
+   not hand-maintained; plus Himalayas + Jobicy (verified strong) and
+   RemoteOK (verified per-tag only); dedup/filter logic; theirstack.com
+   stays a lower-priority maybe.
    Revisit a paid aggregator tier only if this combo's real volume/coverage proves
    insufficient.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
@@ -365,15 +386,17 @@ than either silently shipping it or silently discarding it.
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
 - ~~Job-aggregator API subscriptions~~ — **settled 2026-09-01, $0/mo**:
-  primary source is direct Greenhouse/Lever/Ashby polling against
-  `target-employer-list.md` (live-tested strongest of everything tried),
-  plus Himalayas + Jobicy (both live-tested, strong) and RemoteOK
-  (live-tested, per-tag only) — see §1 for what got dropped after testing
-  (Remotive, Arbeitnow, HiringCafe). $50/mo ceiling held in reserve.
-- `target-employer-list.md` — 19 companies live-verified 2026-09-01 with
-  real numbers, the rest still needs the same check before ingestion
-  depends on it; also still needs Matt's prune pass (comp floor, any
-  companies to rule out).
+  primary source is direct Greenhouse/Lever/Ashby polling, company list
+  grown by search-discovery rather than hand-maintained (§1), plus
+  Himalayas + Jobicy (both live-tested, strong) and RemoteOK (live-tested,
+  per-tag only) — see §1 for what got dropped after testing (Remotive,
+  Arbeitnow, HiringCafe). $50/mo ceiling held in reserve.
+- ~~`target-employer-list.md` prune pass~~ — **superseded 2026-09-01**:
+  comp floor ($130k) and competitor scope were real decisions and are
+  resolved; pruning the company list itself isn't needed anymore since
+  it's no longer a hand-maintained artifact — see §1. The file now serves
+  only as the 19-company seed/proof-of-concept data for the discovery
+  table.
 - Scoped AWS credentials (see least-privilege note in §4).
 - A Google Cloud project for Gmail API OAuth (send + poll for the "ok"
   reply) — free tier, just needs the OAuth consent screen set up once and
