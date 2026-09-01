@@ -94,7 +94,15 @@ EventBridge (schedule)
    │                    postings the structured-field filter couldn't
    │                    resolve (e.g. "remote" in the title but the body
    │                    says hybrid-3-days) — a reject here counts as the
-   │                    remote filter catching it, not a fit-score miss
+   │                    remote filter catching it, not a fit-score miss.
+   │                    Comp floor: **$130k base or total comp, confirmed
+   │                    with Matt 2026-09-01** — where a posting states a
+   │                    range, reject below floor; where none is stated,
+   │                    comp is one factor in the fit rationale, not a
+   │                    silent auto-reject (no data to reject on). No
+   │                    non-compete/competitor restriction — direct
+   │                    fraud-detection/insurance-data competitors are in
+   │                    scope normally, nothing to flag specially.
    ▼
 [Threshold gate + weekly cap] → only postings above the fit-score bar
    │                             proceed; starts at ~100/week (scale up from
