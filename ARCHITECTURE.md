@@ -83,42 +83,21 @@ EventBridge (schedule)
 | Observability | CloudWatch alarms on Lambda errors / DLQ depth / weekly spend; a kill switch (SSM parameter or EventBridge rule disable) to pause the whole pipeline instantly |
 | IaC | CDK (Python, to match your stack) — everything above defined as code, not clicked in the console, so it's reproducible and reviewable |
 
-## 3. Open decisions (need Matt's call before building)
+## 3. Decisions (settled)
 
-**Decision 1 — how does the "ok" reply get detected?**
-- *Option A: Gmail API.* Send and poll via OAuth against your actual Gmail
-  account. Everything stays inside your existing inbox, no domain needed.
-  One-time setup: a Google Cloud project + OAuth consent + refresh token
-  stored in Secrets Manager.
-- *Option B: SES send + SES inbound receive.* SES sends the approval email
-  (From a verified identity) with `Reply-To` set to an address on a
-  subdomain you control (e.g. `apply.yourdomain.com`), SES receives the
-  reply and triggers a Lambda directly — no Google credentials involved at
-  all, purely AWS. Requires you to own a domain and delegate a subdomain's
-  MX records to SES (via Route 53 or your existing DNS).
+**Reply detection: Gmail API.** Send and poll via OAuth against Matt's
+actual Gmail account. Everything stays inside the existing inbox, no domain
+needed. One-time setup: a Google Cloud project + OAuth consent + refresh
+token stored in Secrets Manager.
 
-**Decision 2 — how far does "fully automatic" go on the actual submission?**
-- *Option A: All-ATS headless automation.* Playwright drives the real
-  application form for every ATS, including ones without a documented
-  public "apply" API (Greenhouse, Ashby, Workday, etc.). Most complete, but
-  it's the most fragile piece (forms change, some ATS front bot-detection
-  like Cloudflare/hCaptcha in front of application forms) and sails closest
-  to most platforms' terms-of-service language against automated
-  submissions — worth doing deliberately (real info, one submission per
-  real posting you actually want, throttled to ~8-15/week) rather than
-  brushing past.
-- *Option B: API-first with a one-click fallback.* Fully automatic
-  submission only on ATS with a documented apply endpoint (Lever
-  confirmed; need to re-verify Greenhouse/Ashby before relying on them).
-  For everything else, the approval email's "ok" reply triggers
-  pre-filling and opens a review-and-submit link instead of a true
-  zero-click submission — still nearly hands-off, meaningfully more
-  robust, easier to ship first.
-
-My default recommendation is **A for decision 1** (no domain hassle,
-everything in the inbox you already use) and **B for decision 2** to start
-(ship the fragile part last, expand ATS coverage once the rest is proven),
-but both are genuinely your call.
+**Submission scope: API-first + one-click fallback, to start.** True
+zero-click auto-submit only on ATS with a documented apply endpoint
+(confirmed for Lever; Greenhouse/Ashby need re-checking closer to
+implementation). Everywhere else, the "ok" reply pre-fills the form and
+opens a review-and-submit link rather than a true zero-click submission.
+Playwright-based full automation for the remaining ATS is a phase-2
+expansion once the rest of the pipeline is proven, not part of the initial
+build.
 
 ## 4. Guardrails (building these in regardless of the above)
 
@@ -158,10 +137,10 @@ but both are genuinely your call.
 
 ## 6. What's needed to start
 
-- Answers to the two open decisions above.
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
 - Curated target-employer list (~100-200 cos) — can draft this together.
 - Scoped AWS credentials (see least-privilege note in §4).
-- If Decision 1 = Option A: a Google Cloud project for Gmail API OAuth.
-- If Decision 1 = Option B: a domain you control for the reply subdomain.
+- A Google Cloud project for Gmail API OAuth (send + poll for the "ok"
+  reply) — free tier, just needs the OAuth consent screen set up once and
+  a refresh token generated.
