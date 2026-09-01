@@ -47,14 +47,17 @@ EventBridge (schedule)
    │                                 ordered bullets) — not a laid-out
    │                                 document
    ▼
-[Authenticity + Grounding QA Lambda] → a separately-framed adversarial pass
-   │                                    (see §4) on every generated string
-   │                                    before it reaches Matt or an
-   │                                    employer: rewrites against an
-   │                                    AI-writing-tell checklist, and
-   │                                    verifies every factual claim traces
-   │                                    to a specific line in the
-   │                                    accomplishment inventory
+[Authenticity + Grounding + Specificity QA Lambda] → a separately-framed
+   │                                    adversarial pass (see §4) on every
+   │                                    generated string before it reaches
+   │                                    Matt or an employer: rewrites
+   │                                    against an AI-writing-tell
+   │                                    checklist, verifies every factual
+   │                                    claim traces to a specific record
+   │                                    in the accomplishment inventory,
+   │                                    and rejects true-but-abstracted
+   │                                    bullets that never name the actual
+   │                                    system/technique/domain
    ▼
 [Render] → deterministic renderer drops the QA'd structured content into
    │        the one fixed single-column template; PDF stored in S3
@@ -115,7 +118,7 @@ Playwright-based full automation for the remaining ATS is a phase-2
 expansion once the rest of the pipeline is proven, not part of the initial
 build.
 
-## 4. Generated-content QA (authenticity + grounding pass)
+## 4. Generated-content QA (authenticity + grounding + specificity passes)
 
 Every string Bedrock generates — résumé bullets, summary, cover-letter/
 short-answer text — goes through a second, separately-framed Bedrock call
@@ -142,13 +145,33 @@ LLM writing tells, rather than a vague "make this sound human" instruction
 - Title-Case Headers Everywhere as filler structure
 
 **Pass 2 — grounding.** Every factual/quantified claim in the generated
-text must trace to a specific line in `nicb-resume-info.md` or
-`career-history.md`. Catches drift (an inflated number, a tool that was
-never actually used, a claim the JD's language nudged the model toward)
-— including drift induced by adversarial content embedded in a job
-posting itself, since the JD text is untrusted input to these prompts.
-Anything that doesn't trace cleanly gets dropped, not guessed into
-plausibility.
+text must trace to a specific `accomplishment-inventory.json` record id
+(the inventory's `source` field chains back to `nicb-resume-info.md` or
+`career-history.md` for deeper traceability). Catches drift (an inflated
+number, a tool that was never actually used, a claim the JD's language
+nudged the model toward) — including drift induced by adversarial content
+embedded in a job posting itself, since the JD text is untrusted input to
+these prompts. Anything that doesn't trace cleanly gets dropped, not
+guessed into plausibility.
+
+**Pass 3 — specificity.** Found empirically, not designed in advance: the
+first hand-assembled sample résumé (`sample-resume-senior-ds.md`) produced
+two bullets that were true, on-topic, and completely unreadable — "a
+validation threshold," "a deprecated managed explainability service" —
+because concrete nouns (entity resolution, SHAP/TreeSHAP, which system,
+which domain) got abstracted away while tightening the prose. This is a
+different failure than authenticity (doesn't sound like AI) or grounding
+(isn't a false claim) — it's true and clean and says nothing. Checks: does
+every bullet name the actual system/technique/domain rather than a generic
+stand-in ("a system," "an implementation," "a service," "a tool")? Would
+someone with zero context on this person's work know what the bullet is
+about? The root cause turned out to be upstream too — several
+`accomplishment-inventory.json` records had this same vagueness baked into
+their `text` field even with the concrete detail sitting unused in
+`metrics` (e.g. `nicb-er-calibration` never said "entity resolution" while
+its own `metrics` field had "doctor NPI cohesion" right there) — fixed
+2026-09-01, but worth this pass catching it again if it recurs, since nothing
+stops a future edit from reintroducing it.
 
 **Guardrails on the QA pass itself:** capped at 2 revision loops (cost/
 latency control); anything still unresolved after that holds the
