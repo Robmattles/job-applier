@@ -40,10 +40,24 @@ EventBridge (schedule)
    │                             day doesn't flood the inbox
    ▼
 [Résumé/Letter Generation Lambda] → Bedrock (higher-quality model, e.g.
-   │                                 Claude Sonnet) rewrites the chosen
-   │                                 lane template using the evidence
-   │                                 audit; renders single-column PDF;
-   │                                 stores in S3
+   │                                 Claude Sonnet) runs the evidence audit
+   │                                 against the accomplishment inventory
+   │                                 for the chosen lane and outputs
+   │                                 structured content (headline, summary,
+   │                                 ordered bullets) — not a laid-out
+   │                                 document
+   ▼
+[Authenticity + Grounding QA Lambda] → a separately-framed adversarial pass
+   │                                    (see §4) on every generated string
+   │                                    before it reaches Matt or an
+   │                                    employer: rewrites against an
+   │                                    AI-writing-tell checklist, and
+   │                                    verifies every factual claim traces
+   │                                    to a specific line in the
+   │                                    accomplishment inventory
+   ▼
+[Render] → deterministic renderer drops the QA'd structured content into
+   │        the one fixed single-column template; PDF stored in S3
    ▼
 [Approval Email Lambda] → sends ONE email per posting to Matt's Gmail:
    │                        company, role, fit rationale, link to the
@@ -79,7 +93,7 @@ EventBridge (schedule)
 | Queueing | SQS between scoring→generation and approval→submission, so nothing is lost on a Lambda failure/retry |
 | Storage — structured | DynamoDB: `postings` (dedup), `applications` (funnel state machine), `pending_approvals` (TTL) |
 | Storage — documents | S3: master résumé/accomplishment inventory (source of truth), generated résumé/cover-letter PDFs per application, submission confirmation screenshots |
-| LLM | Bedrock — tiered: a cheap/fast model for the first-pass fit score on every posting (high volume), a stronger model for the résumé rewrite + evidence audit on postings that clear the bar (low volume, quality matters) |
+| LLM | Bedrock — tiered: a cheap/fast model for the first-pass fit score on every posting (high volume), a stronger model for the résumé rewrite + evidence audit on postings that clear the bar (low volume, quality matters), and a separately-framed model for the authenticity/grounding QA critique pass (§4) so the critic isn't just the drafter rubber-stamping itself |
 | Secrets | Secrets Manager — Gmail/Google OAuth token if that's the chosen mechanism, any ATS credentials |
 | Email | SES (send) + either SES inbound (receive) or Gmail API (read replies) — see open decision #1 |
 | Observability | CloudWatch alarms on Lambda errors / DLQ depth / weekly spend; a kill switch (SSM parameter or EventBridge rule disable) to pause the whole pipeline instantly |
@@ -101,7 +115,47 @@ Playwright-based full automation for the remaining ATS is a phase-2
 expansion once the rest of the pipeline is proven, not part of the initial
 build.
 
-## 4. Guardrails (building these in regardless of the above)
+## 4. Generated-content QA (authenticity + grounding pass)
+
+Every string Bedrock generates — résumé bullets, summary, cover-letter/
+short-answer text — goes through a second, separately-framed Bedrock call
+before it's ever shown to Matt or an employer. Separately-framed matters:
+having the same call that drafted the text also approve it tends to just
+rubber-stamp its own style; a distinct critic pass (ideally a different
+model — e.g. Haiku critiquing Sonnet's draft) catches more.
+
+**Pass 1 — authenticity.** Rewrites against a concrete checklist of
+LLM writing tells, rather than a vague "make this sound human" instruction
+(models do much better with specifics than with a mood):
+- Rhetorical em-dash overuse
+- Rule-of-three / triadic listing ("fast, reliable, and scalable")
+- Stock transitions and hedges ("It's worth noting," "Moreover,"
+  "Furthermore," "In today's fast-paced environment")
+- Buzzword-as-filler ("leverage," "robust," "seamless," "cutting-edge,"
+  "results-driven," "passionate about") unless backed by a specific number
+- Uniform sentence rhythm — every bullet the same [verb][object][result]
+  shape with no variation
+- Excessive hedging ("can potentially help to")
+- Perfectly balanced "not only X but also Y" constructions
+- Generic opening lines ("As a highly motivated professional…")
+- Mechanical keyword-stuffing that doesn't read naturally
+- Title-Case Headers Everywhere as filler structure
+
+**Pass 2 — grounding.** Every factual/quantified claim in the generated
+text must trace to a specific line in `nicb-resume-info.md` or
+`career-history.md`. Catches drift (an inflated number, a tool that was
+never actually used, a claim the JD's language nudged the model toward)
+— including drift induced by adversarial content embedded in a job
+posting itself, since the JD text is untrusted input to these prompts.
+Anything that doesn't trace cleanly gets dropped, not guessed into
+plausibility.
+
+**Guardrails on the QA pass itself:** capped at 2 revision loops (cost/
+latency control); anything still unresolved after that holds the
+application in a NEEDS_REVIEW state for Matt to look at manually rather
+than either silently shipping it or silently discarding it.
+
+## 5. Guardrails (building these in regardless of the above)
 
 - **Weekly application cap**, highest fit-score first — starts at ~100/week
   (Matt's call, overriding the more conservative "8-15 strong matches"
@@ -125,23 +179,25 @@ build.
   above (Lambda, DynamoDB, S3, SQS, EventBridge, Bedrock, SES, Secrets
   Manager, IAM-limited, CloudWatch), not root/admin keys.
 
-## 5. Build phases
+## 6. Build phases
 
 1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
    Secrets Manager, S3/DynamoDB tables.
 2. **Ingestion** — Greenhouse/Lever/Ashby connectors, employer list,
    dedup/filter logic; verify HiringCafe feasibility.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
-4. **Generation** — lane-specific résumé rewrite + PDF rendering,
-   single-column/clean-parse validated.
-5. **Approval loop** — send + reply detection per decision #1, TTL on
+4. **Generation** — lane-specific structured-content rewrite (§1) against
+   the accomplishment inventory.
+5. **QA pass** — authenticity + grounding checks (§4), NEEDS_REVIEW path;
+   fixed-template rendering to single-column/clean-parse-validated PDF.
+6. **Approval loop** — send + reply detection per decision #1, TTL on
    pending approvals.
-6. **Submission** — API-first submitters, Playwright fallback per
+7. **Submission** — API-first submitters, Playwright fallback per
    decision #2, confirmation capture.
-7. **Reporting** — weekly funnel digest email, CloudWatch dashboard.
-8. **Guardrails hardening** — cap, budget alarm, kill switch, audit trail.
+8. **Reporting** — weekly funnel digest email, CloudWatch dashboard.
+9. **Guardrails hardening** — cap, budget alarm, kill switch, audit trail.
 
-## 6. What's needed to start
+## 7. What's needed to start
 
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
