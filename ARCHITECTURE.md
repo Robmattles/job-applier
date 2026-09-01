@@ -59,6 +59,22 @@ EventBridge (schedule)
    │                                    bullets that never name the actual
    │                                    system/technique/domain
    ▼
+[Recruiter/ATS Adversarial QA Lambda] → a fourth pass (see §4), on the
+   │                                     whole assembled document against
+   │                                     the actual JD: roleplays a
+   │                                     skeptical recruiter/ATS screen —
+   │                                     JD-requirement coverage gaps,
+   │                                     narrative/seniority-signal
+   │                                     clarity, reasons to reject. A
+   │                                     gap fixable by re-selecting
+   │                                     evidence loops back to
+   │                                     Generation once; anything left
+   │                                     unresolved (usually a genuine
+   │                                     evidence gap, not a rewrite
+   │                                     problem) goes to Matt as a
+   │                                     NEEDS_REVIEW note attached to
+   │                                     the application, not a silent drop
+   ▼
 [Render] → deterministic renderer drops the QA'd structured content into
    │        the one fixed single-column template; PDF stored in S3
    ▼
@@ -118,7 +134,7 @@ Playwright-based full automation for the remaining ATS is a phase-2
 expansion once the rest of the pipeline is proven, not part of the initial
 build.
 
-## 4. Generated-content QA (authenticity + grounding + specificity passes)
+## 4. Generated-content QA (authenticity + grounding + specificity + recruiter passes)
 
 Every string Bedrock generates — résumé bullets, summary, cover-letter/
 short-answer text — goes through a second, separately-framed Bedrock call
@@ -172,6 +188,32 @@ their `text` field even with the concrete detail sitting unused in
 its own `metrics` field had "doctor NPI cohesion" right there) — fixed
 2026-09-01, but worth this pass catching it again if it recurs, since nothing
 stops a future edit from reintroducing it.
+
+**Pass 4 — recruiter/ATS adversarial review.** Different in kind from
+passes 1-3: those operate per-bullet and don't need the target JD; this one
+operates on the whole assembled document *against the actual posting*,
+roleplaying a skeptical recruiter or ATS keyword screen rather than an
+editor. This is the "act as a skeptical hiring manager" evidence-audit
+idea from the original job-search strategy, formalized as a pipeline stage
+instead of a one-off prompt. It produces:
+- The 5 strongest reasons to interview, grounded in what's actually on the
+  page (sanity-checks that the strongest evidence actually made the cut)
+- The 3 most likely reasons to reject — JD requirements with no visible
+  coverage, a seniority/title signal that reads wrong, a narrative gap
+- Anything the JD explicitly asks for that the résumé is silent on, even
+  if the accomplishment inventory has evidence for it elsewhere that
+  simply didn't get selected this time
+- Basic ATS-parseability sanity checks (consistent date formats, no
+  tables/columns/graphics, standard section headers) — a real but
+  usually-already-satisfied check given the fixed single-column template
+
+On a finding that's fixable by re-selecting or re-surfacing existing
+inventory evidence (wrong bullet got cut, a requirement's evidence exists
+but wasn't chosen), loops back to the Generation step once. On a finding
+that isn't fixable that way — a genuine gap in the evidence itself, not a
+selection problem — no amount of rewriting closes it; that's a NEEDS_REVIEW
+note for Matt, not something the pipeline should paper over by fabricating
+or straining existing evidence to fit.
 
 **Guardrails on the QA pass itself:** capped at 2 revision loops (cost/
 latency control); anything still unresolved after that holds the
