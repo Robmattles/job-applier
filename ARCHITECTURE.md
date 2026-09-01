@@ -45,24 +45,38 @@ EventBridge (schedule)
    │                 zero postings on a full 175-job first page were both
    │                 remote and DS/ML-relevant — wrong geography for this
    │                 search).
-   │                 STILL UNKNOWN — theirstack.com's free tier (200 API
-   │                 credits/mo) requires an account/API key neither of
-   │                 us has created yet; untested, not yet a "use" call.
-   │                 Total cost so far: $0.
-   │                 PAID, held in reserve, not subscribed yet —
-   │                 theirstack.com's first paid tier ($59/mo, $9 over
-   │                 ceiling — small stretch, ask before paying) or
-   │                 fantastic.jobs ($95/mo official, over ceiling; a
-   │                 ~$1/1,000-job pay-per-use option exists via RapidAPI
-   │                 that could stay under $50 with volume capped, but
-   │                 needs active usage monitoring — more moving parts).
-   │                 RULED OUT — HiringCafe (no official API, scraping-
-   │                 only). Also: direct per-company polling of
-   │                 Greenhouse's official free API (per-company only,
-   │                 no cross-company search — confirmed 2026-09-01,
-   │                 this is the one source that needs a company list) for
-   │                 a small hand-picked watchlist Matt wants
-   │                 faster-than-aggregator alerts on.
+   │                 PROMOTED TO PRIMARY, not a secondary watchlist —
+   │                 direct per-company polling of Greenhouse/Lever/
+   │                 Ashby's official free APIs. Live-tested 2026-09-01
+   │                 against ~19 well-known companies (chosen for name
+   │                 recognition, not pre-screened for fit) at $0: 314
+   │                 DS/ML/AI title matches, 189 remote-flagged — denser
+   │                 than any single free aggregator above, using only
+   │                 official per-company endpoints. Ashby exposes a clean
+   │                 `isRemote` boolean (more reliable than string-
+   │                 matching "remote" in a location field, which is all
+   │                 Greenhouse/Lever expose). This is the one source that
+   │                 needs a curated company list — see
+   │                 `target-employer-list.md`, now worth actually
+   │                 building out rather than treated as optional, since
+   │                 testing (not assumption) is what justifies it this
+   │                 time.
+   │                 STILL UNKNOWN, lower priority now — theirstack.com's
+   │                 free tier (200 API credits/mo) requires an account
+   │                 neither of us has created; given how well $0 direct
+   │                 polling already performed, may not be worth pursuing
+   │                 unless a real coverage gap shows up later.
+   │                 RULED OUT — HiringCafe: confirmed 2026-09-01 that
+   │                 real server-rendered job data exists on the site
+   │                 (it claims 3.6M jobs/125K companies) but search/
+   │                 filtering is entirely client-side JS with no
+   │                 documented query scheme — a live fetch with title
+   │                 and remote filters in the URL was silently ignored
+   │                 and returned unrelated results (Parts Manager,
+   │                 Pharmacist, Diesel Mechanic). Building on it would
+   │                 mean reverse-engineering an undocumented internal
+   │                 endpoint — not worth it with three working official
+   │                 sources already in hand. Total cost so far: $0.
    ▼
 [Dedup + Filter]  → DynamoDB "seen postings" table; title regex; **remote
    │                 only — hard filter, not a scoring factor** (checked
@@ -320,11 +334,11 @@ than either silently shipping it or silently discarding it.
 
 1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
    Secrets Manager, S3/DynamoDB tables.
-2. **Ingestion** — connectors for Himalayas + Jobicy (verified strong) and
-   RemoteOK (verified-per-tag only); theirstack.com free tier once an
-   account exists to test it (§1, $0 either way); optional small
-   watchlist + direct-polling connector; dedup/filter logic. Revisit a
-   paid aggregator tier only if this combo's real volume/coverage proves
+2. **Ingestion** — connectors for direct Greenhouse/Lever/Ashby polling
+   against `target-employer-list.md` (primary, live-tested strongest) plus
+   Himalayas + Jobicy (verified strong) and RemoteOK (verified per-tag
+   only); dedup/filter logic; theirstack.com stays a lower-priority maybe.
+   Revisit a paid aggregator tier only if this combo's real volume/coverage proves
    insufficient.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
 4. **Generation** — lane-specific structured-content rewrite (§1) against
@@ -343,14 +357,15 @@ than either silently shipping it or silently discarding it.
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
 - ~~Job-aggregator API subscriptions~~ — **settled 2026-09-01, $0/mo**:
-  Himalayas + Jobicy (both live-tested, strong) and RemoteOK (live-tested,
-  usable per-tag only) — see §1 for what actually got dropped after
-  testing (Remotive, Arbeitnow) versus what's still unverified
-  (theirstack.com). $50/mo ceiling held in reserve, not spent.
-- Optional: a small hand-picked watchlist for direct high-freshness
-  polling — see `target-employer-list.md`, demoted from primary mechanism
-  to this secondary role 2026-09-01; needs pruning to a much shorter list
-  than currently drafted if used at all.
+  primary source is direct Greenhouse/Lever/Ashby polling against
+  `target-employer-list.md` (live-tested strongest of everything tried),
+  plus Himalayas + Jobicy (both live-tested, strong) and RemoteOK
+  (live-tested, per-tag only) — see §1 for what got dropped after testing
+  (Remotive, Arbeitnow, HiringCafe). $50/mo ceiling held in reserve.
+- `target-employer-list.md` — 19 companies live-verified 2026-09-01 with
+  real numbers, the rest still needs the same check before ingestion
+  depends on it; also still needs Matt's prune pass (comp floor, any
+  companies to rule out).
 - Scoped AWS credentials (see least-privilege note in §4).
 - A Google Cloud project for Gmail API OAuth (send + poll for the "ok"
   reply) — free tier, just needs the OAuth consent screen set up once and
