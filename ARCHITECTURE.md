@@ -20,22 +20,28 @@ AWS credentials.
 EventBridge (schedule)
    │
    ▼
-[Ingest Lambdas]  → PRIMARY: a commercial job-aggregator API (candidates:
-   │                 fantastic.jobs, theirstack.com — pricing/ToS/coverage
-   │                 not yet verified, next research task) that already
-   │                 indexes postings across thousands of companies on
-   │                 Greenhouse/Lever/Ashby/Workday through one endpoint,
-   │                 so no curated company list is required for broad
-   │                 coverage. SECONDARY, optional: direct per-company
-   │                 polling of Greenhouse's official free API
-   │                 (GET /v1/boards/{company}/jobs — genuinely
-   │                 per-company only, confirmed 2026-09-01, this is why
-   │                 direct polling needs a company list and the
-   │                 aggregator doesn't) for a small hand-picked watchlist
-   │                 of companies Matt most wants fast alerts on, layered
-   │                 on top of the aggregator rather than replacing it.
-   │                 HiringCafe ruled out as an ingestion source — no
-   │                 official API, scraping-only, confirmed 2026-09-01.
+[Ingest Lambdas]  → No reason to pick just one source — this step is a
+   │                 fan-in, and Dedup right below already exists to
+   │                 collapse overlap, so the marginal cost of one more
+   │                 source is roughly one more Lambda, not a redesign.
+   │                 Run every source that clears a cost/value bar in
+   │                 parallel: one or more commercial job-aggregator APIs
+   │                 (candidates: fantastic.jobs, theirstack.com — cost,
+   │                 ToS, and how much their coverage actually overlaps
+   │                 vs. complements each other are all unverified, next
+   │                 research task, and "how much do multiple actually
+   │                 overlap" is itself a reason to run more than one
+   │                 rather than a reason to pick one), each indexing
+   │                 postings across thousands of companies on
+   │                 Greenhouse/Lever/Ashby/Workday through one endpoint;
+   │                 plus direct per-company polling of Greenhouse's
+   │                 official free API (GET /v1/boards/{company}/jobs —
+   │                 genuinely per-company only, confirmed 2026-09-01,
+   │                 this is the one source that does need a company
+   │                 list) for a small hand-picked watchlist Matt wants
+   │                 faster-than-aggregator alerts on. HiringCafe ruled
+   │                 out as a source entirely — no official API,
+   │                 scraping-only, confirmed 2026-09-01.
    ▼
 [Dedup + Filter]  → DynamoDB "seen postings" table; title regex; **remote
    │                 only — hard filter, not a scoring factor** (checked
@@ -293,10 +299,10 @@ than either silently shipping it or silently discarding it.
 
 1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
    Secrets Manager, S3/DynamoDB tables.
-2. **Ingestion** — evaluate and pick a commercial job-aggregator API
-   (coverage, pricing, ToS) as the primary source; connector for it;
-   optional small watchlist + direct-polling connector as a secondary
-   freshness channel; dedup/filter logic.
+2. **Ingestion** — evaluate the commercial job-aggregator APIs (coverage,
+   pricing, ToS, overlap between them); connectors for every one that
+   clears the cost/value bar, not just the best single one; optional small
+   watchlist + direct-polling connector; dedup/filter logic.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
 4. **Generation** — lane-specific structured-content rewrite (§1) against
    the accomplishment inventory.
@@ -313,8 +319,9 @@ than either silently shipping it or silently discarding it.
 
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
-- A chosen job-aggregator API (see §1) — the real blocker is picking one
-  and confirming pricing/ToS, not curating a company list.
+- One or more job-aggregator API subscriptions (see §1) — the real blocker
+  is researching coverage/pricing/ToS for each and deciding which combo is
+  worth the combined monthly cost, not narrowing to a single winner.
 - Optional: a small hand-picked watchlist for direct high-freshness
   polling — see `target-employer-list.md`, demoted from primary mechanism
   to this secondary role 2026-09-01; needs pruning to a much shorter list
