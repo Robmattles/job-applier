@@ -33,9 +33,11 @@ EventBridge (schedule)
    │                    (Senior DS / Applied MLE / Applied AI)
    ▼
 [Threshold gate + weekly cap] → only postings above the fit-score bar
-   │                             proceed; capped at ~8-15/week, highest
-   │                             score first, so a busy day doesn't flood
-   │                             the inbox
+   │                             proceed; starts at ~100/week (scale up from
+   │                             there as long as the bar is genuinely
+   │                             being cleared, not lowered to hit a
+   │                             number), highest score first, so a busy
+   │                             day doesn't flood the inbox
    ▼
 [Résumé/Letter Generation Lambda] → Bedrock (higher-quality model, e.g.
    │                                 Claude Sonnet) rewrites the chosen
@@ -101,9 +103,13 @@ build.
 
 ## 4. Guardrails (building these in regardless of the above)
 
-- **Weekly application cap**, highest fit-score first — matches the "8-15
-  strong matches/week, not 100 mediocre ones" advice from the search
-  strategy discussion.
+- **Weekly application cap**, highest fit-score first — starts at ~100/week
+  (Matt's call, overriding the more conservative "8-15 strong matches"
+  pacing from the earlier search-strategy discussion), scaling up from
+  there as long as the fit-score bar keeps being cleared by genuinely
+  relevant postings rather than the bar dropping to fill a quota. The cap
+  exists to keep a freak high-volume day from flooding the inbox with
+  approval emails, not to hold volume down deliberately.
 - **Cost ceiling**: CloudWatch billing alarm at a threshold you set; Bedrock
   calls tiered cheap-model-first so scoring 100s of postings/day doesn't
   burn budget on the expensive model.
