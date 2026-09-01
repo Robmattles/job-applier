@@ -20,9 +20,22 @@ AWS credentials.
 EventBridge (schedule)
    │
    ▼
-[Ingest Lambdas]  → Greenhouse / Lever / Ashby job-board APIs for a curated
-   │                 employer list (~100-200 cos); optional HiringCafe feed
-   │                 (needs verification — no confirmed public API yet)
+[Ingest Lambdas]  → PRIMARY: a commercial job-aggregator API (candidates:
+   │                 fantastic.jobs, theirstack.com — pricing/ToS/coverage
+   │                 not yet verified, next research task) that already
+   │                 indexes postings across thousands of companies on
+   │                 Greenhouse/Lever/Ashby/Workday through one endpoint,
+   │                 so no curated company list is required for broad
+   │                 coverage. SECONDARY, optional: direct per-company
+   │                 polling of Greenhouse's official free API
+   │                 (GET /v1/boards/{company}/jobs — genuinely
+   │                 per-company only, confirmed 2026-09-01, this is why
+   │                 direct polling needs a company list and the
+   │                 aggregator doesn't) for a small hand-picked watchlist
+   │                 of companies Matt most wants fast alerts on, layered
+   │                 on top of the aggregator rather than replacing it.
+   │                 HiringCafe ruled out as an ingestion source — no
+   │                 official API, scraping-only, confirmed 2026-09-01.
    ▼
 [Dedup + Filter]  → DynamoDB "seen postings" table; title regex; **remote
    │                 only — hard filter, not a scoring factor** (checked
@@ -280,8 +293,10 @@ than either silently shipping it or silently discarding it.
 
 1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
    Secrets Manager, S3/DynamoDB tables.
-2. **Ingestion** — Greenhouse/Lever/Ashby connectors, employer list,
-   dedup/filter logic; verify HiringCafe feasibility.
+2. **Ingestion** — evaluate and pick a commercial job-aggregator API
+   (coverage, pricing, ToS) as the primary source; connector for it;
+   optional small watchlist + direct-polling connector as a secondary
+   freshness channel; dedup/filter logic.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
 4. **Generation** — lane-specific structured-content rewrite (§1) against
    the accomplishment inventory.
@@ -298,8 +313,12 @@ than either silently shipping it or silently discarding it.
 
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
-- Curated target-employer list (~100-200 cos), biased toward companies with
-  genuine remote hiring for DS/ML/AI roles — see `target-employer-list.md`.
+- A chosen job-aggregator API (see §1) — the real blocker is picking one
+  and confirming pricing/ToS, not curating a company list.
+- Optional: a small hand-picked watchlist for direct high-freshness
+  polling — see `target-employer-list.md`, demoted from primary mechanism
+  to this secondary role 2026-09-01; needs pruning to a much shorter list
+  than currently drafted if used at all.
 - Scoped AWS credentials (see least-privilege note in §4).
 - A Google Cloud project for Gmail API OAuth (send + poll for the "ok"
   reply) — free tier, just needs the OAuth consent screen set up once and
