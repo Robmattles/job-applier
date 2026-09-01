@@ -24,13 +24,23 @@ EventBridge (schedule)
    │                 employer list (~100-200 cos); optional HiringCafe feed
    │                 (needs verification — no confirmed public API yet)
    ▼
-[Dedup + Filter]  → DynamoDB "seen postings" table; title regex; posting
-   │                 age < 48h preferred, hard cutoff otherwise
+[Dedup + Filter]  → DynamoDB "seen postings" table; title regex; **remote
+   │                 only — hard filter, not a scoring factor** (checked
+   │                 against the posting's own location/workplace-type
+   │                 field where the ATS exposes one; ambiguous postings
+   │                 fall through to the fit-scoring step to make the call
+   │                 from the JD text, not silently pass); posting age
+   │                 < 48h preferred, hard cutoff otherwise
    ▼
 [Fit-Scoring Lambda] → Bedrock (cheap model, e.g. Claude Haiku) does an
    │                    "evidence audit" against the master résumé: fit
    │                    score, reasons to interview/reject, lane pick
-   │                    (Senior DS / Applied MLE / Applied AI)
+   │                    (Senior DS / Applied MLE / Applied AI); also makes
+   │                    the final remote/no call from the JD text on
+   │                    postings the structured-field filter couldn't
+   │                    resolve (e.g. "remote" in the title but the body
+   │                    says hybrid-3-days) — a reject here counts as the
+   │                    remote filter catching it, not a fit-score miss
    ▼
 [Threshold gate + weekly cap] → only postings above the fit-score bar
    │                             proceed; starts at ~100/week (scale up from
@@ -288,7 +298,8 @@ than either silently shipping it or silently discarding it.
 
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
-- Curated target-employer list (~100-200 cos) — can draft this together.
+- Curated target-employer list (~100-200 cos), biased toward companies with
+  genuine remote hiring for DS/ML/AI roles — see `target-employer-list.md`.
 - Scoped AWS credentials (see least-privilege note in §4).
 - A Google Cloud project for Gmail API OAuth (send + poll for the "ok"
   reply) — free tier, just needs the OAuth consent screen set up once and
