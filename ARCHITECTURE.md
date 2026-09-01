@@ -23,20 +23,32 @@ EventBridge (schedule)
 [Ingest Lambdas]  → Fan-in from every source that clears a cost/value bar;
    │                 Dedup right below already exists to collapse overlap,
    │                 so adding a source costs roughly one more Lambda, not
-   │                 a redesign. Confirmed 2026-09-01, within Matt's
-   │                 $50/mo aggregator budget:
-   │                 FREE, run all of these — Himalayas (no auth, remote
-   │                 by construction, filterable by keyword/seniority/
-   │                 salary/timezone), RemoteOK (remoteok.com/api,
-   │                 official), Remotive (remotive.com/api/remote-jobs,
-   │                 official — personal use is fine, its ToS only
-   │                 forbids redistributing to other job boards),
-   │                 Arbeitnow, Jobicy, and theirstack.com's free tier
-   │                 (200 API credits/mo, rolls over) for broader
-   │                 Greenhouse/Lever/Ashby coverage beyond remote-native
-   │                 boards. Total cost: $0 — spend nothing until this
-   │                 combo's actual volume/coverage over a few weeks
-   │                 proves insufficient.
+   │                 a redesign. Each of the 6 free candidates was actually
+   │                 queried live 2026-09-01, not just read about — real
+   │                 volume varied a lot from the docs:
+   │                 USE — Himalayas (`q=` param, not `keyword=` as first
+   │                 assumed; "data scientist"/Senior+ alone returned 920
+   │                 live matches at real companies) and Jobicy
+   │                 (`tag=data`: 30/100 genuinely relevant incl. Senior/
+   │                 Director titles at Twilio, Meta, Fivetran, Liberty
+   │                 Mutual, RevenueCat). Both free, no auth, strong.
+   │                 USE WITH CAUTION — RemoteOK (`api?tag=machine-learning`
+   │                 works well; `tag=data-science` silently returns the
+   │                 unfiltered firehose instead of filtering — verify
+   │                 each tag empirically before relying on it, don't
+   │                 assume tag names work from the name alone).
+   │                 DROPPED — Remotive (free tier capped at 18 jobs,
+   │                 24h-delayed, near-zero relevance in testing; its own
+   │                 docs disclose the real feed is a $5k/mo paid
+   │                 product — free tier is a marketing sample, not a
+   │                 real source) and Arbeitnow (Germany/EU-focused;
+   │                 zero postings on a full 175-job first page were both
+   │                 remote and DS/ML-relevant — wrong geography for this
+   │                 search).
+   │                 STILL UNKNOWN — theirstack.com's free tier (200 API
+   │                 credits/mo) requires an account/API key neither of
+   │                 us has created yet; untested, not yet a "use" call.
+   │                 Total cost so far: $0.
    │                 PAID, held in reserve, not subscribed yet —
    │                 theirstack.com's first paid tier ($59/mo, $9 over
    │                 ceiling — small stretch, ask before paying) or
@@ -308,8 +320,9 @@ than either silently shipping it or silently discarding it.
 
 1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
    Secrets Manager, S3/DynamoDB tables.
-2. **Ingestion** — connectors for the five free remote-board APIs +
-   theirstack.com free tier (§1, settled 2026-09-01, $0); optional small
+2. **Ingestion** — connectors for Himalayas + Jobicy (verified strong) and
+   RemoteOK (verified-per-tag only); theirstack.com free tier once an
+   account exists to test it (§1, $0 either way); optional small
    watchlist + direct-polling connector; dedup/filter logic. Revisit a
    paid aggregator tier only if this combo's real volume/coverage proves
    insufficient.
@@ -330,8 +343,10 @@ than either silently shipping it or silently discarding it.
 - Master résumé + accomplishment inventory (raw material for the three
   lane variants: Senior DS / Applied MLE / Applied AI).
 - ~~Job-aggregator API subscriptions~~ — **settled 2026-09-01, $0/mo**:
-  five free remote-board APIs plus theirstack.com's free tier (see §1).
-  $50/mo ceiling held in reserve, not spent, pending real volume data.
+  Himalayas + Jobicy (both live-tested, strong) and RemoteOK (live-tested,
+  usable per-tag only) — see §1 for what actually got dropped after
+  testing (Remotive, Arbeitnow) versus what's still unverified
+  (theirstack.com). $50/mo ceiling held in reserve, not spent.
 - Optional: a small hand-picked watchlist for direct high-freshness
   polling — see `target-employer-list.md`, demoted from primary mechanism
   to this secondary role 2026-09-01; needs pruning to a much shorter list
