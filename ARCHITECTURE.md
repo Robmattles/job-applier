@@ -410,20 +410,20 @@ NEEDS_REVIEW for Matt rather than silently shipping or discarding it.
 
 Everything content- and design-related is done: master résumé +
 accomplishment inventory (§ résumé files), ingestion sources (§1, $0/mo),
-comp/competitor criteria (§3). What's left:
+comp/competitor criteria (§3), `applicant-profile.json` filled in.
 
-- **Scoped AWS credentials** — a dedicated IAM user/role, not root (see
-  least-privilege note in §5). Policy drafted: `iam-policy-job-applier.json`.
-  Setup steps: `setup-runbook.md` §1. This same profile is what the local
-  Submission Worker uses too, not just deployment.
-- **A Google Cloud project for Gmail API OAuth** — free, ~10 minutes.
-  Setup steps: `setup-runbook.md` §2, including the Testing-vs-Production
-  gotcha from §3 above.
-- **`applicant-profile.json` filled in with real answers** — template
-  exists, needs Matt's actual work-authorization status, years of
-  experience, desired salary, GitHub/site, and the rest of the
-  SAFE_AUTOFILL fields before the Submission Worker can run against it.
-- Once those exist: stand up the CDK foundation (§6, phase 1) that
+- ~~**Scoped AWS credentials**~~ — **done 2026-09-02.** `job-applier-agent`
+  IAM user, two least-privilege policies (`iam-policy-job-applier-core.json`,
+  `iam-policy-job-applier-ops.json` — split from one because the original
+  exceeded AWS's 6144-char managed-policy limit), local `job-applier`
+  CLI profile configured and verified. Details: `setup-runbook.md` §1.
+  This same profile is what the local Submission Worker uses too, not
+  just deployment. **One follow-up still open: delete the temporary root
+  access key used to bootstrap this** (setup-runbook.md §1).
+- **A Google Cloud project for Gmail API OAuth** — free, ~10 minutes,
+  still not done. Setup steps: `setup-runbook.md` §2, including the
+  Testing-vs-Production gotcha from §3 above.
+- Once that exists: stand up the CDK foundation (§6, phase 1) that
   everything else attaches to.
 
 One caveat worth repeating, not a blocker but a real one: the QA passes in
