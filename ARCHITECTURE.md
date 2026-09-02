@@ -8,8 +8,10 @@ that email — that reply triggers form-fill, and Matt personally completes
 anything a script shouldn't (CAPTCHA, final submit) on his own machine.
 Everything else runs unattended on AWS.
 
-Status: **design settled, no infrastructure built yet.** All decisions in
-§3 are closed. What's left is the concrete build — see §7. Full history of
+Status: **design settled, credentials in place, no infrastructure built
+yet.** All decisions in §3 are closed, both setup blockers in §7 are
+done. What's left is the concrete build, starting with the CDK
+foundation (§6 phase 1). Full history of
 what was tried, tested, and rejected along the way lives in git history,
 not in this document — this file describes the current design only.
 Revised 2026-09-02 after a real architecture review caught two errors in
@@ -427,16 +429,17 @@ comp/competitor criteria (§3), `applicant-profile.json` filled in.
   IAM user, two least-privilege policies (`iam-policy-job-applier-core.json`,
   `iam-policy-job-applier-ops.json` — split from one because the original
   exceeded AWS's 6144-char managed-policy limit), local `job-applier`
-  CLI profile configured and verified. Details: `setup-runbook.md` §1.
-  This same profile is what the local Submission Worker uses too, not
-  just deployment. **One follow-up still open: delete the temporary root
-  access key used to bootstrap this** (setup-runbook.md §1).
+  CLI profile configured and verified, temporary root bootstrap key
+  deleted. Details: `setup-runbook.md` §1. This same profile is what the
+  local Submission Worker uses too, not just deployment.
 - ~~A Google Cloud project for Gmail API OAuth~~ — **no longer needed,
   corrected 2026-09-02** (see §3 — switched to IMAP + App Password).
-- **A Gmail App Password** — 2 minutes once 2-Step Verification is
-  confirmed on. Setup steps: `setup-runbook.md` §2.
-- Once that exists: stand up the CDK foundation (§6, phase 1) that
-  everything else attaches to.
+- ~~**A Gmail App Password**~~ — **done 2026-09-02.** Generated, stored
+  in Secrets Manager as `job-applier-gmail-app-password`, verified via
+  `describe-secret`. Details: `setup-runbook.md` §2.
+
+**Both blockers are now clear — nothing left needed from Matt to start
+building.** Next: stand up the CDK foundation (§6, phase 1).
 
 One caveat worth repeating, not a blocker but a real one: the QA passes in
 §4 have only been run by me manually simulating Bedrock, with Matt
