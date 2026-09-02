@@ -45,11 +45,25 @@ EventBridge (schedule)
    │                insufficient once running — not before.
    ▼
 [Dedup + Filter] → DynamoDB "seen postings" table; title regex; **remote
-   │                only — hard filter, not a scoring factor** (checked
-   │                against the posting's own location/workplace-type
-   │                field; ambiguous postings fall through to
-   │                fit-scoring to decide from JD text, not silently
-   │                pass). Stores `source_published_at`,
+   │                only — hard filter, not a scoring factor**, three
+   │                layers so phrasing variety doesn't leak through
+   │                (flagged by Matt 2026-09-02 — JDs describe remote
+   │                arrangements in more ways than the literal word
+   │                "remote"): (1) structured field where the ATS exposes
+   │                one — Ashby's `isRemote` boolean is authoritative;
+   │                (2) an expanded string-match against Greenhouse/
+   │                Lever's free-text location field — "remote,"
+   │                "distributed," "work from home," "WFH," "remote-
+   │                first," "anywhere," "remote (US)" and similar,
+   │                explicitly excluding "hybrid" and "remote flexible/
+   │                remote days" patterns that aren't actually remote
+   │                despite containing the word; (3) anything that field
+   │                doesn't cleanly resolve falls through to fit-scoring,
+   │                which reads the full JD text with an LLM rather than
+   │                a fixed pattern — this is the actual correctness
+   │                backstop, not the regex, since natural-language
+   │                phrasing will always outrun a pattern list. Stores
+   │                `source_published_at`,
    │                `source_updated_at`, `first_seen_at` — no hard
    │                freshness cutoff; freshness is a ranking input at the
    │                threshold-gate step, not a gate itself, since a
