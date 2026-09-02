@@ -4,14 +4,17 @@ Goal: a fully automated pipeline that discovers senior DS / Applied ML / Applied
 job postings, scores fit against a master résumé, generates a tailored résumé +
 cover letter/short answers per posting (via AWS Bedrock), and emails Matt one
 message per candidate application. The **only** human step is replying "ok" to
-that email — that reply triggers the actual submission. Everything else runs
-unattended on AWS.
+that email — that reply triggers form-fill, and Matt personally completes
+anything a script shouldn't (CAPTCHA, final submit) on his own machine.
+Everything else runs unattended on AWS.
 
 Status: **design settled, no infrastructure built yet.** All decisions in
 §3 are closed. What's left is the concrete build — see §7. Full history of
-what was tried, tested, and rejected along the way (job-aggregator
-vendors, HiringCafe, etc.) lives in git history, not in this document —
-this file describes the current design only.
+what was tried, tested, and rejected along the way lives in git history,
+not in this document — this file describes the current design only.
+Revised 2026-09-02 after a real architecture review caught two errors in
+the original design (submission mechanism, company-discovery mechanism) —
+see §3 for what changed and why.
 
 ---
 
@@ -22,40 +25,36 @@ EventBridge (schedule)
    │
    ▼
 [Ingest Lambdas] → Two source families, both free and official, fanning
-   │                into the same Dedup step below (so adding/dropping a
-   │                source is a config change, not a redesign):
+   │                into the same Dedup step below:
    │                (1) PRIMARY — direct per-company polling of
    │                Greenhouse/Lever/Ashby's free public APIs. Highest
-   │                density of any source tested. The company list is not
-   │                hand-maintained: a scheduled search-discovery Lambda
-   │                runs `site:` queries (per ATS platform × target job
-   │                title) on a rotation, extracts new company board
-   │                tokens from the result URLs, and writes them to a
-   │                DynamoDB "known companies" table that this polling
-   │                connector reads from — the list grows itself.
-   │                `target-employer-list.md` seeds that table with 19
-   │                already-verified companies.
-   │                (2) SECONDARY — three remote-job-board APIs: Himalayas
-   │                and Jobicy (both used as-is, no caveats), and RemoteOK
-   │                (specific tags only — verify each tag empirically
-   │                before relying on it; its "data-science" tag silently
-   │                ignores the filter and returns the unfiltered firehose).
-   │                Ashby also exposes a clean `isRemote` boolean, more
-   │                reliable than the string-matching Greenhouse/Lever
-   │                require.
-   │                Total ingestion cost: $0/month. The $50/mo ceiling is
-   │                unspent, held in reserve for a paid aggregator
-   │                (candidates: theirstack.com, fantastic.jobs) if this
-   │                combination's real coverage proves insufficient once
-   │                it's actually running — not before.
+   │                density of any source tested. Company list grows from
+   │                company names surfaced by every source — normalize
+   │                the name to a likely board-token slug, probe the
+   │                three ATS's free APIs directly (a 200 response
+   │                confirms a real board), add hits to the
+   │                `known_companies` table. `target-employer-list.md`
+   │                seeds it with 19 already-verified companies.
+   │                (2) SECONDARY — Himalayas, Jobicy (both used as-is),
+   │                and RemoteOK (specific tags only — verify each tag
+   │                empirically, its "data-science" tag silently ignores
+   │                the filter). Ashby exposes a clean `isRemote` boolean,
+   │                more reliable than Greenhouse/Lever's location string.
+   │                Total ingestion cost: $0/month, $50/mo ceiling in
+   │                reserve for a paid aggregator if this proves
+   │                insufficient once running — not before.
    ▼
 [Dedup + Filter] → DynamoDB "seen postings" table; title regex; **remote
    │                only — hard filter, not a scoring factor** (checked
    │                against the posting's own location/workplace-type
-   │                field where the ATS exposes one; ambiguous postings
-   │                fall through to fit-scoring to make the call from the
-   │                JD text, not silently pass); posting age < 48h
-   │                preferred, hard cutoff otherwise
+   │                field; ambiguous postings fall through to
+   │                fit-scoring to decide from JD text, not silently
+   │                pass). Stores `source_published_at`,
+   │                `source_updated_at`, `first_seen_at` — no hard
+   │                freshness cutoff; freshness is a ranking input at the
+   │                threshold-gate step, not a gate itself, since a
+   │                strong 4-day-old posting should beat a mediocre
+   │                4-hour-old one.
    ▼
 [Fit-Scoring Lambda] → Bedrock (cheap model, e.g. Claude Haiku) does an
    │                    "evidence audit" against the accomplishment
@@ -67,14 +66,11 @@ EventBridge (schedule)
    │                    floor where a posting states a range; where none
    │                    is stated, comp is one factor in the rationale,
    │                    not a silent auto-reject. No non-compete/
-   │                    competitor restriction — direct fraud-detection/
-   │                    insurance-data competitors are in scope normally.
+   │                    competitor restriction.
    ▼
-[Threshold gate + weekly cap] → only postings above the fit-score bar
-   │                             proceed; starts at ~100/week, scaling up
-   │                             as long as the bar is genuinely being
-   │                             cleared (not lowered to hit a number),
-   │                             highest score first
+[Threshold gate + weekly cap] → ranks by fit score blended with freshness;
+   │                             cap ramps per the schedule in §5, not a
+   │                             flat 100/week from day one
    ▼
 [Résumé/Letter Generation Lambda] → Bedrock (higher-quality model, e.g.
    │                                 Claude Opus) runs the evidence audit
@@ -106,14 +102,13 @@ EventBridge (schedule)
    │                                     gap fixable by re-selecting
    │                                     evidence loops back to
    │                                     Generation once; anything left
-   │                                     unresolved (usually a genuine
-   │                                     evidence gap, not a rewrite
-   │                                     problem) goes to Matt as a
-   │                                     NEEDS_REVIEW note attached to
-   │                                     the application, not a silent drop
+   │                                     unresolved goes to Matt as a
+   │                                     NEEDS_REVIEW note, not a silent
+   │                                     drop
    ▼
 [Render] → deterministic renderer drops the QA'd structured content into
-   │        the one fixed visually appealing and machine readable single-column template; PDF stored in S3
+   │        the one fixed, visually appealing and machine-readable
+   │        single-column template; PDF stored in S3
    ▼
 [Approval Email Lambda] → sends ONE email per posting to Matt's Gmail:
    │                        company, role, fit rationale, link to the
@@ -125,11 +120,25 @@ EventBridge (schedule)
 [Reply Listener] → detects the "ok" reply via Gmail API (§3), flips
    │                DynamoDB status → APPROVED, enqueues to SQS
    ▼
-[Submission Worker] → Lever's documented apply API where available;
-   │                   otherwise headless-browser (Playwright, in a
-   │                   Fargate task or Lambda container) fills the real
-   │                   ATS form with the generated documents; captures a
-   │                   confirmation screenshot; writes SUBMITTED
+[Submission Worker] → runs LOCALLY on Matt's machine (Matt's call,
+   │                   "whichever's easier" — local avoids remote-desktop
+   │                   friction entirely, since it's a real visible
+   │                   Chrome window on his own screen). Fills
+   │                   SAFE_AUTOFILL fields from `applicant-profile.json`,
+   │                   drafts GENERATE_GROUNDED answers for open-ended
+   │                   questions (grounding-checked against the
+   │                   accomplishment inventory same as résumé bullets),
+   │                   and pauses for Matt to personally complete anything
+   │                   NEEDS_REVIEW — a CAPTCHA, an unfamiliar legal
+   │                   attestation, an ambiguous question — never attempts
+   │                   to defeat a CAPTCHA or invent an answer. This is the
+   │                   submission mechanism from day one, not a phase-2
+   │                   fallback — see §3 for why the originally-planned
+   │                   "API-first" approach doesn't actually work.
+   │                   Postings sourced only from Himalayas with no
+   │                   resolvable direct ATS board go straight to
+   │                   NEEDS_REVIEW rather than building a fourth apply
+   │                   pathway for MVP (see §3).
    ▼
 [Funnel tracker] → DynamoDB row per application: source, posting age,
                     lane, résumé version, ATS, dates, and later manually
@@ -144,11 +153,11 @@ EventBridge (schedule)
 | Concern | Service |
 |---|---|
 | Scheduling | EventBridge Scheduler |
-| Compute | Lambda for everything except browser automation; Fargate (or Lambda container image) for Playwright submission jobs |
-| Queueing | SQS between scoring→generation and approval→submission, so nothing is lost on a Lambda failure/retry |
-| Storage — structured | DynamoDB: `postings` (dedup), `known_companies` (ingestion, grown by search-discovery), `applications` (funnel state machine), `pending_approvals` (TTL) |
+| Compute | Lambda for ingestion/scoring/generation/QA/email; the Submission Worker runs locally on Matt's machine (Playwright against a real browser), not in AWS — see §3 |
+| Queueing | SQS between scoring→generation and approval→submission (the local worker polls this queue using the same scoped credential from `setup-runbook.md`), so nothing is lost on a Lambda failure/retry |
+| Storage — structured | DynamoDB: `postings` (dedup), `known_companies` (ingestion, grown by name-probing), `applications` (funnel state machine), `pending_approvals` (TTL) |
 | Storage — documents | S3: master résumé/accomplishment inventory (source of truth), generated résumé/cover-letter PDFs per application, submission confirmation screenshots |
-| LLM | Bedrock — tiered: a cheap/fast model for the first-pass fit score on every posting (high volume), a stronger model for the résumé rewrite + evidence audit on postings that clear the bar (low volume, quality matters), and a separately-framed model for the QA critique passes (§4) so the critic isn't just the drafter rubber-stamping itself |
+| LLM | Bedrock — tiered: a cheap/fast model for the first-pass fit score on every posting (high volume), a stronger model for the résumé rewrite + evidence audit + grounded application-answer generation on postings that clear the bar (low volume, quality matters), and a separately-framed model for the QA critique passes (§4) so the critic isn't just the drafter rubber-stamping itself |
 | Secrets | Secrets Manager — Gmail/Google OAuth token, any ATS credentials |
 | Email | SES (send) + Gmail API (read replies) — see §3 |
 | Observability | CloudWatch alarms on Lambda errors / DLQ depth / weekly spend; a kill switch (SSM parameter or EventBridge rule disable) to pause the whole pipeline instantly |
@@ -157,18 +166,62 @@ EventBridge (schedule)
 ## 3. Decisions (settled)
 
 **Reply detection: Gmail API.** Send and poll via OAuth against Matt's
-actual Gmail account. Everything stays inside the existing inbox, no domain
-needed. One-time setup: a Google Cloud project + OAuth consent + refresh
-token stored in Secrets Manager.
+actual Gmail account. One-time setup: a Google Cloud project + OAuth
+consent + refresh token in Secrets Manager. **Gotcha, confirmed
+2026-09-02:** an OAuth consent screen left in "Testing" publishing status
+issues refresh tokens that expire after 7 days — this will look like it
+works, then silently stop a week later. Move the consent screen to "In
+production" before generating the real refresh token (see
+`setup-runbook.md` §2 for what that involves).
 
-**Submission scope: API-first + one-click fallback, to start.** True
-zero-click auto-submit only on ATS with a documented apply endpoint
-(confirmed for Lever; Greenhouse/Ashby need re-checking closer to
-implementation). Everywhere else, the "ok" reply pre-fills the form and
-opens a review-and-submit link rather than a true zero-click submission.
-Playwright-based full automation for the remaining ATS is a phase-2
-expansion once the rest of the pipeline is proven, not part of the initial
-build.
+**Submission mechanism: Playwright, local execution, from day one —
+corrected 2026-09-02.** The original design planned "API-first" auto-
+submission via each ATS's application-submission endpoint. That doesn't
+work for arbitrary employers: Greenhouse's, Lever's, and Ashby's
+application-POST endpoints all require the *employer's own* API key
+(Lever's docs are explicit that it must be generated by a Super Admin of
+that employer's account) — not something an outside applicant can obtain.
+The public GET endpoints used for discovery are anonymous; submission
+never is. So there is no real "API-first" tier to fall back from —
+browser automation against the employer's actual hosted application form
+is the only real submission path, for every employer, starting now, not
+as a phase-2 expansion.
+
+Runs locally rather than in AWS Fargate, specifically to solve the
+CAPTCHA/final-review handoff: a real, visible browser on Matt's own
+screen needs no remote-desktop session at all, versus a cloud-hosted
+headless browser which would. Matt is fine completing CAPTCHAs and final
+submit clicks personally, as long as it's not RDP-into-a-Windows-box
+levels of friction — local execution satisfies that directly. AWS-hosted
+execution remains possible later if preferred; not the default because it
+solves a problem that doesn't otherwise exist.
+
+**Company discovery: name-probing, not a search API — corrected
+2026-09-02.** The original design planned a scheduled Lambda running
+`site:` queries against a search API to find new company board tokens.
+Confirmed 2026-09-02: Google's Custom Search JSON API — the practical way
+to run programmatic `site:` searches — is closed to new signups and shuts
+down entirely 2027-01-01. Dead end regardless of when this gets built.
+Replacement: every ingested posting, from any source, carries a company
+name (Himalayas' `companySlug`, Jobicy's `companyName`, etc.) even when it
+doesn't carry a usable original-ATS URL — normalize the name to a likely
+board-token slug and probe Greenhouse/Lever/Ashby's free APIs directly. A
+200 response confirms a real board at no cost beyond a wasted API call on
+a miss. Needs no search API, no per-query cost, no Jan-2027 expiration.
+
+**Caveat found while testing this, not fully resolved:** aggregator
+listings don't reliably expose a parseable path to the origin ATS either.
+Checked both live 2026-09-02: Jobicy's job pages do link out to "the
+employer website" (present, not cleanly extractable via a simple fetch);
+Himalayas does not — every Himalayas posting funnels through Himalayas'
+own signup/apply flow, with no origin-ATS link exposed at all. Name-
+probing still works for a Himalayas-sourced posting if that company
+*also* happens to have a direct Greenhouse/Lever/Ashby board — many do —
+but for one that doesn't, there's currently no automated submission path,
+only Himalayas' own (unbuilt) apply flow. MVP choice: route those to
+NEEDS_REVIEW rather than building a fourth submission pathway now. If a
+real search API is needed later, the $50/mo reserve covers a Bing/Brave/
+SerpApi-style option — not Google's, which is the one confirmed dead.
 
 **Ingestion sourcing: direct ATS polling (self-growing company list) +
 three free remote-job-board APIs, $0/month.** See §1. Evaluated and
@@ -176,21 +229,43 @@ rejected: Remotive (free tier is a capped marketing sample; real feed is a
 paid $5k/mo product), Arbeitnow (Germany/EU-focused, no remote DS/ML
 overlap found), HiringCafe (no official API; site search is client-side
 JS with no accessible query interface), and paid cross-ATS aggregators
-(not needed — direct polling outperformed them in live testing). $50/mo
-ceiling held in reserve, not spent.
+(not needed — direct polling outperformed them in live testing).
 
 **Comp floor: $130k** base or total comp. **No non-compete/competitor
 restriction** — direct fraud-detection/insurance-data competitors are in
 scope normally.
 
+**Application-question handling: `applicant-profile.json` + a three-way
+classification — new 2026-09-02.** Every question on an application form
+gets classified before the Submission Worker touches it:
+- **SAFE_AUTOFILL** — an exact, known answer from `applicant-profile.json`
+  (name, contact, work authorization, years of experience, GitHub/site,
+  etc.). Filled automatically, no LLM involved.
+- **GENERATE_GROUNDED** — open-ended questions ("Why are you interested
+  in this role?") answered by Bedrock, grounding-checked against the
+  accomplishment inventory the same way résumé bullets are (§4 Pass 2) —
+  never invented from nothing.
+- **NEEDS_REVIEW** — anything ambiguous, legally meaningful, or
+  unsupported by the profile or inventory: CAPTCHAs, unfamiliar legal
+  attestations, restrictive-covenant questions, salary negotiation
+  beyond what the profile states, demographic/veteran/disability
+  self-identification (these default to "decline to answer" unless Matt
+  explicitly fills in real answers in the profile — never LLM-generated).
+  Matt completes these personally in the local browser session, same
+  motion as a CAPTCHA.
+
+See `applicant-profile.json` for the template — needs Matt's real answers
+before the Submission Worker can run.
+
 ## 4. Generated-content QA (authenticity + grounding + specificity + recruiter passes)
 
 Every string Bedrock generates — résumé bullets, summary, cover-letter/
-short-answer text — goes through a second, separately-framed Bedrock call
-before it's ever shown to Matt or an employer. Separately-framed matters:
-having the same call that drafted the text also approve it tends to just
-rubber-stamp its own style; a distinct critic pass (ideally a different
-model — e.g. Haiku critiquing Sonnet's draft) catches more.
+short-answer text, and now grounded application-question answers — goes
+through a second, separately-framed Bedrock call before it's ever shown
+to Matt or an employer. Separately-framed matters: having the same call
+that drafted the text also approve it tends to just rubber-stamp its own
+style; a distinct critic pass (ideally a different model — e.g. Haiku
+critiquing Opus's draft) catches more.
 
 **Pass 1 — authenticity.** Rewrites against a concrete checklist of
 LLM writing tells, rather than a vague "make this sound human" instruction
@@ -268,11 +343,15 @@ NEEDS_REVIEW for Matt rather than silently shipping or discarding it.
 
 ## 5. Guardrails (building these in regardless of the above)
 
-- **Weekly application cap**, highest fit-score first — starts at ~100/week
-  (Matt's call), scaling up as long as the fit-score bar keeps being
-  cleared by genuinely relevant postings rather than the bar dropping to
-  fill a quota. Exists to keep a freak high-volume day from flooding the
-  inbox, not to hold volume down deliberately.
+- **Weekly application cap, ramped rather than flat from day one:**
+  week 1: 5-10, inspect everything manually. Week 2: 15-25, inspect
+  recruiter score, résumé, and form answers. Weeks 3-4: 30-50, only if
+  the false-positive rate and QA-failure rate are actually low. Beyond
+  that: climb toward 100/week only as far as real data says there are
+  that many genuinely good matches — not because 100 is itself a
+  problem, but because the fit classifier needs calibrating against real
+  outcomes before it's trusted at firehose volume. Always highest
+  fit-score (blended with freshness) first.
 - **Cost ceiling**: CloudWatch billing alarm at a threshold you set; Bedrock
   calls tiered cheap-model-first so scoring 100s of postings/day doesn't
   burn budget on the expensive model.
@@ -287,58 +366,65 @@ NEEDS_REVIEW for Matt rather than silently shipping or discarding it.
   to exactly the services in §2 (Lambda, DynamoDB, S3, SQS, EventBridge,
   Bedrock, SES, Secrets Manager, IAM-limited, CloudWatch), not root/admin
   keys.
+- **Never defeat a CAPTCHA, never invent an answer to an ambiguous or
+  legally-meaningful question** — NEEDS_REVIEW exists precisely so the
+  pipeline doesn't have to.
 
 ## 6. Build phases
 
 1. **Decisions + foundation** — CDK skeleton, IAM, Secrets Manager,
    S3/DynamoDB tables (§2).
-2. **Ingestion** — connectors for direct Greenhouse/Lever/Ashby polling
-   plus the search-discovery Lambda that grows the company list, and
-   Himalayas/Jobicy/RemoteOK; dedup/filter logic.
-3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
+2. **Ingestion** — connectors for direct Greenhouse/Lever/Ashby polling,
+   the name-probing discovery logic that grows `known_companies`, and
+   Himalayas/Jobicy/RemoteOK; dedup/filter logic; freshness stored, not
+   gated.
+3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, ramped
+   weekly cap (§5).
 4. **Generation** — lane-specific structured-content rewrite against the
    accomplishment inventory.
 5. **QA pass** — all four passes (§4), NEEDS_REVIEW path; fixed-template
    rendering to single-column/clean-parse-validated PDF.
 6. **Approval loop** — send + reply detection, TTL on pending approvals.
-7. **Submission** — API-first submitters, Playwright fallback, confirmation
-   capture.
+7. **Submission** — local Playwright worker, `applicant-profile.json`
+   autofill + grounded answer generation + NEEDS_REVIEW handoff (§3);
+   confirmation capture.
 8. **Reporting** — weekly funnel digest email, CloudWatch dashboard.
-9. **Guardrails hardening** — cap, budget alarm, kill switch, audit trail.
+9. **Guardrails hardening** — ramp schedule, budget alarm, kill switch,
+   audit trail.
 
 ## 7. What's needed to start
 
 Everything content- and design-related is done: master résumé +
 accomplishment inventory (§ résumé files), ingestion sources (§1, $0/mo),
-comp/competitor criteria (§3). What's left is infrastructure, and none of
-it is something I can do without you:
+comp/competitor criteria (§3). What's left:
 
 - **Scoped AWS credentials** — a dedicated IAM user/role, not root (see
   least-privilege note in §5). Policy drafted: `iam-policy-job-applier.json`.
-  Setup steps: `setup-runbook.md` §1.
-- **A Google Cloud project for Gmail API OAuth** — free, ~10 minutes,
-  one-time setup for send + reply-detection. Setup steps:
-  `setup-runbook.md` §2.
-- Once both exist: stand up the CDK foundation (§6, phase 1) that
+  Setup steps: `setup-runbook.md` §1. This same profile is what the local
+  Submission Worker uses too, not just deployment.
+- **A Google Cloud project for Gmail API OAuth** — free, ~10 minutes.
+  Setup steps: `setup-runbook.md` §2, including the Testing-vs-Production
+  gotcha from §3 above.
+- **`applicant-profile.json` filled in with real answers** — template
+  exists, needs Matt's actual work-authorization status, years of
+  experience, desired salary, GitHub/site, and the rest of the
+  SAFE_AUTOFILL fields before the Submission Worker can run against it.
+- Once those exist: stand up the CDK foundation (§6, phase 1) that
   everything else attaches to.
 
 One caveat worth repeating, not a blocker but a real one: the QA passes in
 §4 have only been run by me manually simulating Bedrock, with Matt
 catching every miss along the way — not by actual unsupervised Bedrock
-calls yet. Worth proving that out, and probably starting well under the
-100/week target while it does, before trusting this at volume.
+calls yet. The ramp schedule in §5 covers both this and the volume
+estimate below — good reasons independently to prove the pipeline out
+slowly rather than trusting it at volume from day one.
 
 **Estimated raw volume, unverified (2026-09-02):** stock-to-flow estimate
 from the 19-company live test in §1/§3 (189 open remote DS/ML/AI
 postings ÷ an assumed 25-40 day posting dwell time) gives roughly 5-8 new
 relevant remote postings/day from just those 19 companies. Once the
-company list matures via search-discovery, a genuine order-of-magnitude
-guess is 15-50/day system-wide — wide range because company-list growth
-rate and per-company density for the long-tail companies discovery
-actually finds are both unknown. This is a second, independent reason
-(beyond the QA-passes-unproven caveat above) to expect the real ramp to
-start below the 100/week target rather than at it: at the low end of this
-range, raw supply may not comfortably support that cap with room for
-fit-scoring to stay selective. Replace this estimate with real measured
-data once ingestion runs for an actual week — don't keep trusting the
-extrapolation once better data exists.
+company list matures via name-probing discovery, a genuine order-of-
+magnitude guess is 15-50/day system-wide — wide range because company-
+list growth rate and per-company density for the long-tail companies
+discovery actually finds are both unknown. Replace this estimate with
+real measured data once ingestion runs for an actual week.
