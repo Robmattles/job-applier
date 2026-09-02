@@ -32,6 +32,7 @@ def _process(job: dict, source: str, stats: dict) -> None:
         "company_name": company_name,
         "title": job["title"],
         "url": job.get("url", ""),
+        "description": job.get("description", ""),
         "remote_status": "confirmed_remote",
         "source_published_at": job.get("source_published_at"),
         "status": "NEW",

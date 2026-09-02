@@ -118,6 +118,7 @@
       "Action": [
         "sqs:CreateQueue",
         "sqs:DeleteQueue",
+        "sqs:GetQueueUrl",
         "sqs:GetQueueAttributes",
         "sqs:SetQueueAttributes",
         "sqs:SendMessage",
@@ -155,9 +156,18 @@
         "bedrock:InvokeModelWithResponseStream"
       ],
       "Resource": [
-        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude*",
+        "arn:aws:bedrock:*::foundation-model/anthropic.claude*",
         "arn:aws:bedrock:us-east-1:ACCOUNT_ID:inference-profile/*claude*"
       ]
+    },
+    {
+      "Sid": "BedrockInferenceProfileDiagnostics",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListInferenceProfiles",
+        "bedrock:GetInferenceProfile"
+      ],
+      "Resource": "*"
     },
     {
       "Sid": "BedrockListModels",

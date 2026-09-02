@@ -6,11 +6,30 @@ test output). Stdlib `urllib.request` only, deliberately — no `requests`
 dependency means no bundling step for the Lambda layer.
 """
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 
 USER_AGENT = "job-applier/1.0 (personal automation; contact: you@example.com)"
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"[ \t]+")
+_BLANKLINES_RE = re.compile(r"\n{3,}")
+MAX_DESCRIPTION_CHARS = 20_000  # generous for an LLM prompt, safely under DynamoDB's 400KB item cap
+
+
+def clean_description(raw: str) -> str:
+    """Strip HTML tags and collapse whitespace so fit-scoring's prompt
+    (phase 3) gets plain text, not markup noise — and so descriptions
+    don't balloon DynamoDB item size for no benefit."""
+    if not raw:
+        return ""
+    text = _TAG_RE.sub(" ", raw)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = _WS_RE.sub(" ", text)
+    text = _BLANKLINES_RE.sub("\n\n", text)
+    return text.strip()[:MAX_DESCRIPTION_CHARS]
 
 # Confirmed 2026-09-01: RemoteOK's `data-science` tag silently ignores the
 # filter and returns the unfiltered firehose instead of erroring — do not
@@ -42,7 +61,9 @@ def probe_ats_board(platform: str, slug: str) -> bool:
 
 
 def fetch_greenhouse_jobs(board_token: str):
-    data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs")
+    # content=true is required to get description text — without it
+    # Greenhouse's list endpoint returns title/location only.
+    data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs?content=true")
     for j in data.get("jobs", []):
         yield {
             "external_id": str(j.get("id")),
@@ -51,6 +72,7 @@ def fetch_greenhouse_jobs(board_token: str):
             "url": j.get("absolute_url", "") or "",
             "is_remote_flag": None,
             "source_updated_at": j.get("updated_at"),
+            "description": clean_description(j.get("content", "")),
         }
 
 
@@ -65,6 +87,9 @@ def fetch_lever_jobs(company: str):
             "url": j.get("hostedUrl", "") or "",
             "is_remote_flag": None,
             "source_updated_at": None,
+            "description": clean_description(
+                j.get("descriptionPlain") or j.get("description", "")
+            ),
         }
 
 
@@ -78,6 +103,9 @@ def fetch_ashby_jobs(board_name: str):
             "url": j.get("jobUrl") or j.get("applyUrl", "") or "",
             "is_remote_flag": j.get("isRemote"),  # authoritative, layer 1
             "source_updated_at": None,
+            "description": clean_description(
+                j.get("descriptionPlain") or j.get("descriptionHtml", "")
+            ),
         }
 
 
@@ -95,6 +123,9 @@ def fetch_himalayas_jobs(query: str, seniority: str = "Senior,Manager,Director")
             "company_name": j.get("companyName", "") or "",
             "url": j.get("applicationLink", "") or "",
             "source_published_at": j.get("pubDate"),
+            "description": clean_description(
+                j.get("description") or j.get("excerpt", "")
+            ),
         }
 
 
@@ -108,6 +139,9 @@ def fetch_jobicy_jobs(tag: str = "data", count: int = 100):
             "company_name": j.get("companyName", "") or "",
             "url": j.get("url", "") or "",
             "source_published_at": j.get("pubDate"),
+            "description": clean_description(
+                j.get("jobDescription") or j.get("jobExcerpt", "")
+            ),
         }
 
 
@@ -127,4 +161,5 @@ def fetch_remoteok_jobs(tag: str = "machine-learning"):
             "company_name": j.get("company", "") or "",
             "url": j.get("url", "") or "",
             "source_published_at": j.get("date"),
+            "description": clean_description(j.get("description", "")),
         }

@@ -52,6 +52,7 @@ def handler(event, context):
                     "company_name": company.get("display_name", token),
                     "title": job["title"],
                     "url": job.get("url", ""),
+                    "description": job.get("description", ""),
                     "remote_status": remote_status,
                     "source_updated_at": job.get("source_updated_at"),
                     "status": "NEW",
