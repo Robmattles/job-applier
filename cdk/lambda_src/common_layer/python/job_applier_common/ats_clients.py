@@ -5,6 +5,7 @@ taken from docs alone (see git history around that date for the raw
 test output). Stdlib `urllib.request` only, deliberately — no `requests`
 dependency means no bundling step for the Lambda layer.
 """
+import html
 import json
 import re
 import urllib.error
@@ -22,11 +23,17 @@ MAX_DESCRIPTION_CHARS = 20_000  # generous for an LLM prompt, safely under Dynam
 def clean_description(raw: str) -> str:
     """Strip HTML tags and collapse whitespace so fit-scoring's prompt
     (phase 3) gets plain text, not markup noise — and so descriptions
-    don't balloon DynamoDB item size for no benefit."""
+    don't balloon DynamoDB item size for no benefit.
+
+    Bug found live-testing 2026-09-02: Greenhouse's `content` field is
+    HTML-*entity-encoded* HTML — literally `&lt;p&gt;`, not `<p>` — so
+    stripping tags before unescaping entities matched nothing at all.
+    `html.unescape` first, tag-strip second, not the other way around.
+    """
     if not raw:
         return ""
-    text = _TAG_RE.sub(" ", raw)
-    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = html.unescape(raw)
+    text = _TAG_RE.sub(" ", text)
     text = _WS_RE.sub(" ", text)
     text = _BLANKLINES_RE.sub("\n\n", text)
     return text.strip()[:MAX_DESCRIPTION_CHARS]
