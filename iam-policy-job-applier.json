@@ -1,5 +1,4 @@
 {
-  "_comment": "Least-privilege policy for the job-applier project (ARCHITECTURE.md §5). Scoped to a job-applier-* naming convention wherever the service supports resource-level ARN scoping, so this can't touch anything outside the project even with the full policy attached. Not root, not AdministratorAccess. Replace <ACCOUNT_ID> and <REGION> before use. Remove this _comment key before attaching — IAM policies don't allow arbitrary extra keys in some validators.",
   "Version": "2012-10-17",
   "Statement": [
     {
@@ -20,7 +19,7 @@
         "cloudformation:ExecuteChangeSet",
         "cloudformation:DeleteChangeSet"
       ],
-      "Resource": "arn:aws:cloudformation:<REGION>:<ACCOUNT_ID>:stack/job-applier-*/*"
+      "Resource": "arn:aws:cloudformation:us-west-2:ACCOUNT_ID:stack/job-applier-*/*"
     },
     {
       "Sid": "CDKBootstrap",
@@ -34,10 +33,10 @@
         "ssm:GetParameter"
       ],
       "Resource": [
-        "arn:aws:cloudformation:<REGION>:<ACCOUNT_ID>:stack/CDKToolkit/*",
-        "arn:aws:s3:::cdk-*-assets-<ACCOUNT_ID>-<REGION>",
-        "arn:aws:s3:::cdk-*-assets-<ACCOUNT_ID>-<REGION>/*",
-        "arn:aws:ssm:<REGION>:<ACCOUNT_ID>:parameter/cdk-bootstrap/*"
+        "arn:aws:cloudformation:us-west-2:ACCOUNT_ID:stack/CDKToolkit/*",
+        "arn:aws:s3:::cdk-*-assets-ACCOUNT_ID-us-west-2",
+        "arn:aws:s3:::cdk-*-assets-ACCOUNT_ID-us-west-2/*",
+        "arn:aws:ssm:us-west-2:ACCOUNT_ID:parameter/cdk-bootstrap/*"
       ]
     },
     {
@@ -58,7 +57,7 @@
         "lambda:CreateAlias",
         "lambda:UpdateAlias"
       ],
-      "Resource": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:job-applier-*"
+      "Resource": "arn:aws:lambda:us-west-2:ACCOUNT_ID:function:job-applier-*"
     },
     {
       "Sid": "DynamoDBTables",
@@ -79,8 +78,8 @@
         "dynamodb:TagResource"
       ],
       "Resource": [
-        "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/job-applier-*",
-        "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/job-applier-*/index/*"
+        "arn:aws:dynamodb:us-west-2:ACCOUNT_ID:table/job-applier-*",
+        "arn:aws:dynamodb:us-west-2:ACCOUNT_ID:table/job-applier-*/index/*"
       ]
     },
     {
@@ -116,7 +115,7 @@
         "sqs:DeleteMessage",
         "sqs:TagQueue"
       ],
-      "Resource": "arn:aws:sqs:<REGION>:<ACCOUNT_ID>:job-applier-*"
+      "Resource": "arn:aws:sqs:us-west-2:ACCOUNT_ID:job-applier-*"
     },
     {
       "Sid": "EventBridge",
@@ -134,8 +133,8 @@
         "scheduler:GetSchedule"
       ],
       "Resource": [
-        "arn:aws:events:<REGION>:<ACCOUNT_ID>:rule/job-applier-*",
-        "arn:aws:scheduler:<REGION>:<ACCOUNT_ID>:schedule/default/job-applier-*"
+        "arn:aws:events:us-west-2:ACCOUNT_ID:rule/job-applier-*",
+        "arn:aws:scheduler:us-west-2:ACCOUNT_ID:schedule/default/job-applier-*"
       ]
     },
     {
@@ -146,8 +145,8 @@
         "bedrock:InvokeModelWithResponseStream"
       ],
       "Resource": [
-        "arn:aws:bedrock:<REGION>::foundation-model/anthropic.claude*",
-        "arn:aws:bedrock:<REGION>:<ACCOUNT_ID>:inference-profile/*claude*"
+        "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude*",
+        "arn:aws:bedrock:us-west-2:ACCOUNT_ID:inference-profile/*claude*"
       ]
     },
     {
@@ -166,7 +165,7 @@
         "ses:SendEmail",
         "ses:SendRawEmail"
       ],
-      "Resource": "arn:aws:ses:<REGION>:<ACCOUNT_ID>:identity/*",
+      "Resource": "arn:aws:ses:us-west-2:ACCOUNT_ID:identity/*",
       "Condition": {
         "StringLike": {
           "ses:FromAddress": "*@gmail.com"
@@ -195,7 +194,7 @@
         "secretsmanager:DescribeSecret",
         "secretsmanager:TagResource"
       ],
-      "Resource": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:job-applier-*"
+      "Resource": "arn:aws:secretsmanager:us-west-2:ACCOUNT_ID:secret:job-applier-*"
     },
     {
       "Sid": "IAMScopedToProjectRoles",
@@ -212,7 +211,7 @@
         "iam:TagRole",
         "iam:PassRole"
       ],
-      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/job-applier-*"
+      "Resource": "arn:aws:iam::ACCOUNT_ID:role/job-applier-*"
     },
     {
       "Sid": "CloudWatchObservability",
@@ -234,9 +233,9 @@
         "logs:FilterLogEvents"
       ],
       "Resource": [
-        "arn:aws:cloudwatch:<REGION>:<ACCOUNT_ID>:alarm:job-applier-*",
-        "arn:aws:logs:<REGION>:<ACCOUNT_ID>:log-group:/aws/lambda/job-applier-*",
-        "arn:aws:logs:<REGION>:<ACCOUNT_ID>:log-group:/aws/lambda/job-applier-*:*"
+        "arn:aws:cloudwatch:us-west-2:ACCOUNT_ID:alarm:job-applier-*",
+        "arn:aws:logs:us-west-2:ACCOUNT_ID:log-group:/aws/lambda/job-applier-*",
+        "arn:aws:logs:us-west-2:ACCOUNT_ID:log-group:/aws/lambda/job-applier-*:*"
       ]
     },
     {
@@ -248,7 +247,7 @@
         "sns:Publish",
         "sns:TagResource"
       ],
-      "Resource": "arn:aws:sns:<REGION>:<ACCOUNT_ID>:job-applier-*"
+      "Resource": "arn:aws:sns:us-west-2:ACCOUNT_ID:job-applier-*"
     },
     {
       "Sid": "ECRForContainerImages",
@@ -264,7 +263,7 @@
         "ecr:CompleteLayerUpload",
         "ecr:BatchGetImage"
       ],
-      "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/job-applier-*"
+      "Resource": "arn:aws:ecr:us-west-2:ACCOUNT_ID:repository/job-applier-*"
     },
     {
       "Sid": "ECRAuthGlobal",
@@ -290,7 +289,7 @@
       "Resource": "*",
       "Condition": {
         "StringLike": {
-          "ecs:cluster": "arn:aws:ecs:<REGION>:<ACCOUNT_ID>:cluster/job-applier-*"
+          "ecs:cluster": "arn:aws:ecs:us-west-2:ACCOUNT_ID:cluster/job-applier-*"
         }
       }
     },
