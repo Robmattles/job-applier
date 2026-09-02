@@ -49,7 +49,9 @@ class FoundationStack(Stack):
             ),
             time_to_live_attribute="ttl",
             removal_policy=RemovalPolicy.RETAIN,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
         )
 
         # Company-discovery table (§1, §3 "name-probing" mechanism). Seeded
@@ -65,7 +67,9 @@ class FoundationStack(Stack):
                 name="company_slug", type=dynamodb.AttributeType.STRING
             ),
             removal_policy=RemovalPolicy.RETAIN,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
         )
 
         # Funnel state machine (§1 Funnel tracker, §5 audit trail
@@ -82,7 +86,9 @@ class FoundationStack(Stack):
                 name="application_id", type=dynamodb.AttributeType.STRING
             ),
             removal_policy=RemovalPolicy.RETAIN,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
         )
         self.applications_table.add_global_secondary_index(
             index_name="status-index",
@@ -108,7 +114,9 @@ class FoundationStack(Stack):
             ),
             time_to_live_attribute="ttl",
             removal_policy=RemovalPolicy.RETAIN,
-            point_in_time_recovery=True,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
         )
 
         # ------------------------------------------------------------------
