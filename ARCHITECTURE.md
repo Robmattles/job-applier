@@ -7,10 +7,11 @@ message per candidate application. The **only** human step is replying "ok" to
 that email — that reply triggers the actual submission. Everything else runs
 unattended on AWS.
 
-Status: **planning — no infrastructure built yet.** This doc is the reference
-we'll build against once the two open decisions below are settled and Matt
-has supplied (a) the master résumé/accomplishment inventory and (b) scoped
-AWS credentials.
+Status: **design settled, no infrastructure built yet.** All decisions in
+§3 are closed. What's left is the concrete build — see §7. Full history of
+what was tried, tested, and rejected along the way (job-aggregator
+vendors, HiringCafe, etc.) lives in git history, not in this document —
+this file describes the current design only.
 
 ---
 
@@ -20,115 +21,60 @@ AWS credentials.
 EventBridge (schedule)
    │
    ▼
-[Ingest Lambdas]  → Fan-in from every source that clears a cost/value bar;
-   │                 Dedup right below already exists to collapse overlap,
-   │                 so adding a source costs roughly one more Lambda, not
-   │                 a redesign. Each of the 6 free candidates was actually
-   │                 queried live 2026-09-01, not just read about — real
-   │                 volume varied a lot from the docs:
-   │                 USE — Himalayas (`q=` param, not `keyword=` as first
-   │                 assumed; "data scientist"/Senior+ alone returned 920
-   │                 live matches at real companies) and Jobicy
-   │                 (`tag=data`: 30/100 genuinely relevant incl. Senior/
-   │                 Director titles at Twilio, Meta, Fivetran, Liberty
-   │                 Mutual, RevenueCat). Both free, no auth, strong.
-   │                 USE WITH CAUTION — RemoteOK (`api?tag=machine-learning`
-   │                 works well; `tag=data-science` silently returns the
-   │                 unfiltered firehose instead of filtering — verify
-   │                 each tag empirically before relying on it, don't
-   │                 assume tag names work from the name alone).
-   │                 DROPPED — Remotive (free tier capped at 18 jobs,
-   │                 24h-delayed, near-zero relevance in testing; its own
-   │                 docs disclose the real feed is a $5k/mo paid
-   │                 product — free tier is a marketing sample, not a
-   │                 real source) and Arbeitnow (Germany/EU-focused;
-   │                 zero postings on a full 175-job first page were both
-   │                 remote and DS/ML-relevant — wrong geography for this
-   │                 search).
-   │                 PROMOTED TO PRIMARY, not a secondary watchlist —
-   │                 direct per-company polling of Greenhouse/Lever/
-   │                 Ashby's official free APIs. Live-tested 2026-09-01
-   │                 against ~19 well-known companies (chosen for name
-   │                 recognition, not pre-screened for fit) at $0: 314
-   │                 DS/ML/AI title matches, 189 remote-flagged — denser
-   │                 than any single free aggregator above, using only
-   │                 official per-company endpoints. Ashby exposes a clean
-   │                 `isRemote` boolean (more reliable than string-
-   │                 matching "remote" in a location field, which is all
-   │                 Greenhouse/Lever expose).
-   │                 The company list itself is NOT hand-maintained —
-   │                 confirmed 2026-09-01 by testing two `site:` search
-   │                 queries (`site:job-boards.greenhouse.io "Senior Data
-   │                 Scientist" remote`, `site:jobs.ashbyhq.com "Machine
-   │                 Learning Engineer" remote`) against the same three ATS
-   │                 URL patterns: they surfaced Medium, ecoATM, Veeam,
-   │                 Quanata (auto-insurance telematics — direct domain
-   │                 fit), Cogstate, Pipe Technologies, Northbeam, AG1,
-   │                 Zencastr, Quora, Canals — none of which were on the
-   │                 hand-picked list, because none of them are companies
-   │                 Claude happened to think of from training knowledge.
-   │                 That's the actual argument against a static list: it's
-   │                 capped by what one person (or one model) remembers,
-   │                 and the long tail is exactly where a lot of real
-   │                 openings are. So: a scheduled Lambda runs `site:`
-   │                 searches per ATS platform × target title on a
-   │                 rotation, parses result URLs for new board tokens
-   │                 (the company slug is embedded in the URL path), and
-   │                 adds them to a DynamoDB "known companies" table that
-   │                 the direct-polling connector reads from — the list
-   │                 grows itself continuously instead of being maintained
-   │                 by hand. `target-employer-list.md`'s 19 live-tested
-   │                 companies seed that table on day one; nothing more
-   │                 needs to be manually added to it going forward.
-   │                 STILL UNKNOWN, lower priority now — theirstack.com's
-   │                 free tier (200 API credits/mo) requires an account
-   │                 neither of us has created; given how well $0 direct
-   │                 polling already performed, may not be worth pursuing
-   │                 unless a real coverage gap shows up later.
-   │                 RULED OUT — HiringCafe: confirmed 2026-09-01 that
-   │                 real server-rendered job data exists on the site
-   │                 (it claims 3.6M jobs/125K companies) but search/
-   │                 filtering is entirely client-side JS with no
-   │                 documented query scheme — a live fetch with title
-   │                 and remote filters in the URL was silently ignored
-   │                 and returned unrelated results (Parts Manager,
-   │                 Pharmacist, Diesel Mechanic). Building on it would
-   │                 mean reverse-engineering an undocumented internal
-   │                 endpoint — not worth it with three working official
-   │                 sources already in hand. Total cost so far: $0.
+[Ingest Lambdas] → Two source families, both free and official, fanning
+   │                into the same Dedup step below (so adding/dropping a
+   │                source is a config change, not a redesign):
+   │                (1) PRIMARY — direct per-company polling of
+   │                Greenhouse/Lever/Ashby's free public APIs. Highest
+   │                density of any source tested. The company list is not
+   │                hand-maintained: a scheduled search-discovery Lambda
+   │                runs `site:` queries (per ATS platform × target job
+   │                title) on a rotation, extracts new company board
+   │                tokens from the result URLs, and writes them to a
+   │                DynamoDB "known companies" table that this polling
+   │                connector reads from — the list grows itself.
+   │                `target-employer-list.md` seeds that table with 19
+   │                already-verified companies.
+   │                (2) SECONDARY — three remote-job-board APIs: Himalayas
+   │                and Jobicy (both used as-is, no caveats), and RemoteOK
+   │                (specific tags only — verify each tag empirically
+   │                before relying on it; its "data-science" tag silently
+   │                ignores the filter and returns the unfiltered firehose).
+   │                Ashby also exposes a clean `isRemote` boolean, more
+   │                reliable than the string-matching Greenhouse/Lever
+   │                require.
+   │                Total ingestion cost: $0/month. The $50/mo ceiling is
+   │                unspent, held in reserve for a paid aggregator
+   │                (candidates: theirstack.com, fantastic.jobs) if this
+   │                combination's real coverage proves insufficient once
+   │                it's actually running — not before.
    ▼
-[Dedup + Filter]  → DynamoDB "seen postings" table; title regex; **remote
-   │                 only — hard filter, not a scoring factor** (checked
-   │                 against the posting's own location/workplace-type
-   │                 field where the ATS exposes one; ambiguous postings
-   │                 fall through to the fit-scoring step to make the call
-   │                 from the JD text, not silently pass); posting age
-   │                 < 48h preferred, hard cutoff otherwise
+[Dedup + Filter] → DynamoDB "seen postings" table; title regex; **remote
+   │                only — hard filter, not a scoring factor** (checked
+   │                against the posting's own location/workplace-type
+   │                field where the ATS exposes one; ambiguous postings
+   │                fall through to fit-scoring to make the call from the
+   │                JD text, not silently pass); posting age < 48h
+   │                preferred, hard cutoff otherwise
    ▼
 [Fit-Scoring Lambda] → Bedrock (cheap model, e.g. Claude Haiku) does an
-   │                    "evidence audit" against the master résumé: fit
-   │                    score, reasons to interview/reject, lane pick
-   │                    (Senior DS / Applied MLE / Applied AI); also makes
-   │                    the final remote/no call from the JD text on
-   │                    postings the structured-field filter couldn't
-   │                    resolve (e.g. "remote" in the title but the body
-   │                    says hybrid-3-days) — a reject here counts as the
-   │                    remote filter catching it, not a fit-score miss.
-   │                    Comp floor: **$130k base or total comp, confirmed
-   │                    with Matt 2026-09-01** — where a posting states a
-   │                    range, reject below floor; where none is stated,
-   │                    comp is one factor in the fit rationale, not a
-   │                    silent auto-reject (no data to reject on). No
-   │                    non-compete/competitor restriction — direct
-   │                    fraud-detection/insurance-data competitors are in
-   │                    scope normally, nothing to flag specially.
+   │                    "evidence audit" against the accomplishment
+   │                    inventory: fit score, reasons to interview/reject,
+   │                    lane pick (Senior DS / Applied MLE / Applied AI);
+   │                    resolves ambiguous remote/hybrid postings from JD
+   │                    text where the structured filter couldn't. Comp
+   │                    floor: **$130k base or total comp** — reject below
+   │                    floor where a posting states a range; where none
+   │                    is stated, comp is one factor in the rationale,
+   │                    not a silent auto-reject. No non-compete/
+   │                    competitor restriction — direct fraud-detection/
+   │                    insurance-data competitors are in scope normally.
    ▼
 [Threshold gate + weekly cap] → only postings above the fit-score bar
-   │                             proceed; starts at ~100/week (scale up from
-   │                             there as long as the bar is genuinely
-   │                             being cleared, not lowered to hit a
-   │                             number), highest score first, so a busy
-   │                             day doesn't flood the inbox
+   │                             proceed; starts at ~100/week, scaling up
+   │                             as long as the bar is genuinely being
+   │                             cleared (not lowered to hit a number),
+   │                             highest score first
    ▼
 [Résumé/Letter Generation Lambda] → Bedrock (higher-quality model, e.g.
    │                                 Claude Sonnet) runs the evidence audit
@@ -176,9 +122,8 @@ EventBridge (schedule)
    │                        with a TTL (job postings go stale — expire
    │                        pending approvals after ~5 days)
    ▼
-[Reply Listener] → detects the "ok" reply (mechanism = open decision #1
-   │                below), flips DynamoDB status → APPROVED, enqueues
-   │                to SQS
+[Reply Listener] → detects the "ok" reply via Gmail API (§3), flips
+   │                DynamoDB status → APPROVED, enqueues to SQS
    ▼
 [Submission Worker] → Lever's documented apply API where available;
    │                   otherwise headless-browser (Playwright, in a
@@ -201,11 +146,11 @@ EventBridge (schedule)
 | Scheduling | EventBridge Scheduler |
 | Compute | Lambda for everything except browser automation; Fargate (or Lambda container image) for Playwright submission jobs |
 | Queueing | SQS between scoring→generation and approval→submission, so nothing is lost on a Lambda failure/retry |
-| Storage — structured | DynamoDB: `postings` (dedup), `applications` (funnel state machine), `pending_approvals` (TTL) |
+| Storage — structured | DynamoDB: `postings` (dedup), `known_companies` (ingestion, grown by search-discovery), `applications` (funnel state machine), `pending_approvals` (TTL) |
 | Storage — documents | S3: master résumé/accomplishment inventory (source of truth), generated résumé/cover-letter PDFs per application, submission confirmation screenshots |
-| LLM | Bedrock — tiered: a cheap/fast model for the first-pass fit score on every posting (high volume), a stronger model for the résumé rewrite + evidence audit on postings that clear the bar (low volume, quality matters), and a separately-framed model for the authenticity/grounding QA critique pass (§4) so the critic isn't just the drafter rubber-stamping itself |
-| Secrets | Secrets Manager — Gmail/Google OAuth token if that's the chosen mechanism, any ATS credentials |
-| Email | SES (send) + either SES inbound (receive) or Gmail API (read replies) — see open decision #1 |
+| LLM | Bedrock — tiered: a cheap/fast model for the first-pass fit score on every posting (high volume), a stronger model for the résumé rewrite + evidence audit on postings that clear the bar (low volume, quality matters), and a separately-framed model for the QA critique passes (§4) so the critic isn't just the drafter rubber-stamping itself |
+| Secrets | Secrets Manager — Gmail/Google OAuth token, any ATS credentials |
+| Email | SES (send) + Gmail API (read replies) — see §3 |
 | Observability | CloudWatch alarms on Lambda errors / DLQ depth / weekly spend; a kill switch (SSM parameter or EventBridge rule disable) to pause the whole pipeline instantly |
 | IaC | CDK (Python, to match your stack) — everything above defined as code, not clicked in the console, so it's reproducible and reviewable |
 
@@ -224,6 +169,19 @@ opens a review-and-submit link rather than a true zero-click submission.
 Playwright-based full automation for the remaining ATS is a phase-2
 expansion once the rest of the pipeline is proven, not part of the initial
 build.
+
+**Ingestion sourcing: direct ATS polling (self-growing company list) +
+three free remote-job-board APIs, $0/month.** See §1. Evaluated and
+rejected: Remotive (free tier is a capped marketing sample; real feed is a
+paid $5k/mo product), Arbeitnow (Germany/EU-focused, no remote DS/ML
+overlap found), HiringCafe (no official API; site search is client-side
+JS with no accessible query interface), and paid cross-ATS aggregators
+(not needed — direct polling outperformed them in live testing). $50/mo
+ceiling held in reserve, not spent.
+
+**Comp floor: $130k** base or total comp. **No non-compete/competitor
+restriction** — direct fraud-detection/insurance-data competitors are in
+scope normally.
 
 ## 4. Generated-content QA (authenticity + grounding + specificity + recruiter passes)
 
@@ -261,87 +219,60 @@ embedded in a job posting itself, since the JD text is untrusted input to
 these prompts. Anything that doesn't trace cleanly gets dropped, not
 guessed into plausibility.
 
-**Pass 3 — specificity.** Found empirically, not designed in advance: the
-first hand-assembled sample résumé (`sample-resume-senior-ds.md`) produced
-two bullets that were true, on-topic, and completely unreadable — "a
-validation threshold," "a deprecated managed explainability service" —
-because concrete nouns (entity resolution, SHAP/TreeSHAP, which system,
-which domain) got abstracted away while tightening the prose. This is a
-different failure than authenticity (doesn't sound like AI) or grounding
-(isn't a false claim) — it's true and clean and says nothing. Checks: does
-every bullet name the actual system/technique/domain rather than a generic
-stand-in ("a system," "an implementation," "a service," "a tool")? Would
-someone with zero context on this person's work know what the bullet is
-about? The root cause turned out to be upstream too — several
-`accomplishment-inventory.json` records had this same vagueness baked into
-their `text` field even with the concrete detail sitting unused in
-`metrics` (e.g. `nicb-er-calibration` never said "entity resolution" while
-its own `metrics` field had "doctor NPI cohesion" right there) — fixed
-2026-09-01, but worth this pass catching it again if it recurs, since nothing
-stops a future edit from reintroducing it.
+**Pass 3 — specificity.** Catches true, on-topic bullets that say nothing
+— abstracted nouns ("a validation threshold," "a deprecated managed
+explainability service") standing in for the actual system/technique/
+domain. Different failure than authenticity (doesn't sound like AI) or
+grounding (isn't false) — clean and true and empty. Check: does the
+bullet name the real system/technique, or a generic stand-in ("a system,"
+"a service," "a tool")? Would someone with zero context know what it's
+about? Root cause can be upstream in the inventory itself, not just the
+rewrite — a record's `text` field can be vague even with the concrete
+detail sitting unused in its own `metrics` field.
 
 **Pass 4 — recruiter/ATS adversarial review.** Different in kind from
-passes 1-3: those operate per-bullet and don't need the target JD; this one
-operates on the whole assembled document *against the actual posting*,
-roleplaying a skeptical recruiter or ATS keyword screen rather than an
-editor. This is the "act as a skeptical hiring manager" evidence-audit
-idea from the original job-search strategy, formalized as a pipeline stage
-instead of a one-off prompt.
+passes 1-3: those operate per-bullet and don't need the target JD; this
+one operates on the whole assembled document *against the actual
+posting*, roleplaying a skeptical recruiter or ATS keyword screen. The
+"act as a skeptical hiring manager" evidence-audit idea from the original
+job-search strategy, formalized as a pipeline stage.
 
 **Hard rule: every finding must trace to a specific line in the posting.**
-Not a generic resume-best-practices audit — a JD-relevance filter comes
-first. A weakness that's true in the abstract ("no dollar-impact figure
-anywhere") doesn't count unless it maps to something the posting actually
-asks for, and the finding has to name which line. Caught in the first dry
-run doing this loosely: "no dollar-value business-impact figure" got
-flagged as a generic recruiter concern rather than tied to the JD's actual
-"comfortable communicating findings and trade-offs to non-technical
-stakeholders and leadership" line — a real connection, but it should have
-been stated as that connection, not asserted as a universal truth. Worse,
-that looseness let a real miss slide through: mentoring (a *nice-to-have*
-line) got fixed, but stakeholder/leadership communication (a *required*
-line, and a different ask than mentoring) did not — because the two got
-bundled into one finding instead of checked as the two separate
-requirements they are. Precision here matters as much as recall: sloppy
-JD-mapping produces both false-positive findings (flagged but not actually
-what the posting cares about) and false negatives (a real required-line
-gap hiding behind a bundled, imprecise one).
+Not a generic resume-best-practices audit — JD-relevance filtering comes
+first, and required lines get checked individually rather than bundled
+with adjacent nice-to-haves. (A looseness here once let a real gap slide:
+"mentoring" and "stakeholder communication" got bundled as one finding
+and only the nice-to-have half got fixed, while the actually-required
+line stayed uncovered. Precision in the JD-mapping matters as much as
+recall — sloppy mapping produces both false-positive findings and false
+negatives hiding behind a bundled one.)
 
 It produces:
 - The 5 strongest reasons to interview, grounded in what's actually on the
   page (sanity-checks that the strongest evidence actually made the cut)
-- The 3 most likely reasons to reject — each one naming the specific JD
-  line it fails to satisfy, required lines checked separately from
-  nice-to-haves rather than lumped together
-- Every required (not nice-to-have) JD line cross-checked individually
-  against the résumé, even ones that feel adjacent to something already
-  covered — adjacent isn't the same as covered
+- The 3 most likely reasons to reject — each naming the specific JD line
+  it fails, required lines checked separately from nice-to-haves
+- Every required (not nice-to-have) JD line cross-checked individually,
+  even ones that feel adjacent to something already covered
 - Basic ATS-parseability sanity checks (consistent date formats, no
-  tables/columns/graphics, standard section headers) — a real but
-  usually-already-satisfied check given the fixed single-column template
+  tables/columns/graphics, standard section headers) — largely guaranteed
+  by the fixed template rather than something this pass needs to catch
 
-On a finding that's fixable by re-selecting or re-surfacing existing
-inventory evidence (wrong bullet got cut, a requirement's evidence exists
-but wasn't chosen), loops back to the Generation step once. On a finding
-that isn't fixable that way — a genuine gap in the evidence itself, not a
-selection problem — no amount of rewriting closes it; that's a NEEDS_REVIEW
-note for Matt, not something the pipeline should paper over by fabricating
-or straining existing evidence to fit.
+On a finding fixable by re-selecting existing inventory evidence, loops
+back to Generation once. On a genuine evidence gap — not fixable by
+rewriting — it's a NEEDS_REVIEW note for Matt, never papered over.
 
-**Guardrails on the QA pass itself:** capped at 2 revision loops (cost/
-latency control); anything still unresolved after that holds the
-application in a NEEDS_REVIEW state for Matt to look at manually rather
-than either silently shipping it or silently discarding it.
+**Guardrails on the QA passes:** capped at 2 revision loops (cost/latency
+control); anything still unresolved holds the application in
+NEEDS_REVIEW for Matt rather than silently shipping or discarding it.
 
 ## 5. Guardrails (building these in regardless of the above)
 
 - **Weekly application cap**, highest fit-score first — starts at ~100/week
-  (Matt's call, overriding the more conservative "8-15 strong matches"
-  pacing from the earlier search-strategy discussion), scaling up from
-  there as long as the fit-score bar keeps being cleared by genuinely
-  relevant postings rather than the bar dropping to fill a quota. The cap
-  exists to keep a freak high-volume day from flooding the inbox with
-  approval emails, not to hold volume down deliberately.
+  (Matt's call), scaling up as long as the fit-score bar keeps being
+  cleared by genuinely relevant postings rather than the bar dropping to
+  fill a quota. Exists to keep a freak high-volume day from flooding the
+  inbox, not to hold volume down deliberately.
 - **Cost ceiling**: CloudWatch billing alarm at a threshold you set; Bedrock
   calls tiered cheap-model-first so scoring 100s of postings/day doesn't
   burn budget on the expensive model.
@@ -352,52 +283,46 @@ than either silently shipping it or silently discarding it.
 - **Data hygiene**: master résumé and generated documents contain PII;
   S3 buckets are private + encrypted, IAM scoped per-Lambda, no public
   endpoints.
-- **Least-privilege AWS creds for me**: when we get to the credentials
-  step, best is a dedicated IAM user/role scoped to exactly the services
-  above (Lambda, DynamoDB, S3, SQS, EventBridge, Bedrock, SES, Secrets
-  Manager, IAM-limited, CloudWatch), not root/admin keys.
+- **Least-privilege AWS creds for me**: a dedicated IAM user/role scoped
+  to exactly the services in §2 (Lambda, DynamoDB, S3, SQS, EventBridge,
+  Bedrock, SES, Secrets Manager, IAM-limited, CloudWatch), not root/admin
+  keys.
 
 ## 6. Build phases
 
-1. **Decisions + foundation** — settle §3, stand up CDK skeleton, IAM,
-   Secrets Manager, S3/DynamoDB tables.
+1. **Decisions + foundation** — CDK skeleton, IAM, Secrets Manager,
+   S3/DynamoDB tables (§2).
 2. **Ingestion** — connectors for direct Greenhouse/Lever/Ashby polling
-   (primary, live-tested strongest), seeded from `target-employer-list.md`
-   but grown continuously by the `site:` search-discovery Lambda (§1) —
-   not hand-maintained; plus Himalayas + Jobicy (verified strong) and
-   RemoteOK (verified per-tag only); dedup/filter logic; theirstack.com
-   stays a lower-priority maybe.
-   Revisit a paid aggregator tier only if this combo's real volume/coverage proves
-   insufficient.
+   plus the search-discovery Lambda that grows the company list, and
+   Himalayas/Jobicy/RemoteOK; dedup/filter logic.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, weekly cap.
-4. **Generation** — lane-specific structured-content rewrite (§1) against
-   the accomplishment inventory.
-5. **QA pass** — authenticity + grounding checks (§4), NEEDS_REVIEW path;
-   fixed-template rendering to single-column/clean-parse-validated PDF.
-6. **Approval loop** — send + reply detection per decision #1, TTL on
-   pending approvals.
-7. **Submission** — API-first submitters, Playwright fallback per
-   decision #2, confirmation capture.
+4. **Generation** — lane-specific structured-content rewrite against the
+   accomplishment inventory.
+5. **QA pass** — all four passes (§4), NEEDS_REVIEW path; fixed-template
+   rendering to single-column/clean-parse-validated PDF.
+6. **Approval loop** — send + reply detection, TTL on pending approvals.
+7. **Submission** — API-first submitters, Playwright fallback, confirmation
+   capture.
 8. **Reporting** — weekly funnel digest email, CloudWatch dashboard.
 9. **Guardrails hardening** — cap, budget alarm, kill switch, audit trail.
 
 ## 7. What's needed to start
 
-- Master résumé + accomplishment inventory (raw material for the three
-  lane variants: Senior DS / Applied MLE / Applied AI).
-- ~~Job-aggregator API subscriptions~~ — **settled 2026-09-01, $0/mo**:
-  primary source is direct Greenhouse/Lever/Ashby polling, company list
-  grown by search-discovery rather than hand-maintained (§1), plus
-  Himalayas + Jobicy (both live-tested, strong) and RemoteOK (live-tested,
-  per-tag only) — see §1 for what got dropped after testing (Remotive,
-  Arbeitnow, HiringCafe). $50/mo ceiling held in reserve.
-- ~~`target-employer-list.md` prune pass~~ — **superseded 2026-09-01**:
-  comp floor ($130k) and competitor scope were real decisions and are
-  resolved; pruning the company list itself isn't needed anymore since
-  it's no longer a hand-maintained artifact — see §1. The file now serves
-  only as the 19-company seed/proof-of-concept data for the discovery
-  table.
-- Scoped AWS credentials (see least-privilege note in §4).
-- A Google Cloud project for Gmail API OAuth (send + poll for the "ok"
-  reply) — free tier, just needs the OAuth consent screen set up once and
-  a refresh token generated.
+Everything content- and design-related is done: master résumé +
+accomplishment inventory (§ résumé files), ingestion sources (§1, $0/mo),
+comp/competitor criteria (§3). What's left is infrastructure, and none of
+it is something I can do without you:
+
+- **Scoped AWS credentials** — a dedicated IAM user/role, not root (see
+  least-privilege note in §5). I can hand you the exact policy JSON to
+  create it with.
+- **A Google Cloud project for Gmail API OAuth** — free, ~10 minutes,
+  one-time setup for send + reply-detection.
+- Once both exist: stand up the CDK foundation (§6, phase 1) that
+  everything else attaches to.
+
+One caveat worth repeating, not a blocker but a real one: the QA passes in
+§4 have only been run by me manually simulating Bedrock, with Matt
+catching every miss along the way — not by actual unsupervised Bedrock
+calls yet. Worth proving that out, and probably starting well under the
+100/week target while it does, before trusting this at volume.
