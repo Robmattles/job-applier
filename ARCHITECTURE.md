@@ -399,8 +399,20 @@ NEEDS_REVIEW for Matt rather than silently shipping or discarding it.
 
 ## 6. Build phases
 
-1. **Decisions + foundation** — CDK skeleton, IAM, Secrets Manager,
-   S3/DynamoDB tables (§2).
+1. ~~**Decisions + foundation**~~ — **done 2026-09-02.** CDK Python app in
+   `cdk/`; `FoundationStack` deployed: 4 DynamoDB tables, S3 document
+   bucket, 2 SQS queues + DLQs. Deployed and verified using only the
+   scoped `job-applier` policies — `AdministratorAccess` was needed
+   twice, briefly, for `cdk bootstrap` itself and for adding
+   `sts:AssumeRole` on the two CDK bootstrap roles to
+   `iam-policy-job-applier-core.json` (both one-time; detached after).
+   Lambda IAM roles deliberately not pre-created — each gets a scoped
+   role via CDK's `.grant_*()` methods when it's actually defined in a
+   later phase, not hand-written in advance for functions that don't
+   exist yet. Known minor gap: `sqs:GetQueueUrl` isn't in the policy
+   (queue URLs come from CDK outputs/env vars instead, so nothing
+   actually needs it yet) — bundle the fix into a future policy update
+   rather than a one-off elevation.
 2. **Ingestion** — connectors for direct Greenhouse/Lever/Ashby polling,
    the name-probing discovery logic that grows `known_companies`, and
    Himalayas/Jobicy/RemoteOK; dedup/filter logic; freshness stored, not
