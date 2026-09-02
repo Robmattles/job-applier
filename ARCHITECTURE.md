@@ -77,7 +77,7 @@ EventBridge (schedule)
    │                             highest score first
    ▼
 [Résumé/Letter Generation Lambda] → Bedrock (higher-quality model, e.g.
-   │                                 Claude Sonnet) runs the evidence audit
+   │                                 Claude Opus) runs the evidence audit
    │                                 against the accomplishment inventory
    │                                 for the chosen lane and outputs
    │                                 structured content (headline, summary,
@@ -113,7 +113,7 @@ EventBridge (schedule)
    │                                     the application, not a silent drop
    ▼
 [Render] → deterministic renderer drops the QA'd structured content into
-   │        the one fixed single-column template; PDF stored in S3
+   │        the one fixed visually appealing and machine readable single-column template; PDF stored in S3
    ▼
 [Approval Email Lambda] → sends ONE email per posting to Matt's Gmail:
    │                        company, role, fit rationale, link to the
@@ -326,3 +326,18 @@ One caveat worth repeating, not a blocker but a real one: the QA passes in
 catching every miss along the way — not by actual unsupervised Bedrock
 calls yet. Worth proving that out, and probably starting well under the
 100/week target while it does, before trusting this at volume.
+
+**Estimated raw volume, unverified (2026-09-02):** stock-to-flow estimate
+from the 19-company live test in §1/§3 (189 open remote DS/ML/AI
+postings ÷ an assumed 25-40 day posting dwell time) gives roughly 5-8 new
+relevant remote postings/day from just those 19 companies. Once the
+company list matures via search-discovery, a genuine order-of-magnitude
+guess is 15-50/day system-wide — wide range because company-list growth
+rate and per-company density for the long-tail companies discovery
+actually finds are both unknown. This is a second, independent reason
+(beyond the QA-passes-unproven caveat above) to expect the real ramp to
+start below the 100/week target rather than at it: at the low end of this
+range, raw supply may not comfortably support that cap with room for
+fit-scoring to stay selective. Replace this estimate with real measured
+data once ingestion runs for an actual week — don't keep trusting the
+extrapolation once better data exists.
