@@ -131,7 +131,7 @@ EventBridge (schedule)
    │                        with a TTL (job postings go stale — expire
    │                        pending approvals after ~5 days)
    ▼
-[Reply Listener] → detects the "ok" reply via Gmail API (§3), flips
+[Reply Listener] → detects the "ok" reply via Gmail IMAP (§3), flips
    │                DynamoDB status → APPROVED, enqueues to SQS
    ▼
 [Submission Worker] → runs LOCALLY on Matt's machine (Matt's call,
@@ -173,20 +173,31 @@ EventBridge (schedule)
 | Storage — documents | S3: master résumé/accomplishment inventory (source of truth), generated résumé/cover-letter PDFs per application, submission confirmation screenshots |
 | LLM | Bedrock — tiered: a cheap/fast model for the first-pass fit score on every posting (high volume), a stronger model for the résumé rewrite + evidence audit + grounded application-answer generation on postings that clear the bar (low volume, quality matters), and a separately-framed model for the QA critique passes (§4) so the critic isn't just the drafter rubber-stamping itself |
 | Secrets | Secrets Manager — Gmail/Google OAuth token, any ATS credentials |
-| Email | SES (send) + Gmail API (read replies) — see §3 |
+| Email | SES (send) + Gmail IMAP with an App Password (read replies) — see §3 |
 | Observability | CloudWatch alarms on Lambda errors / DLQ depth / weekly spend; a kill switch (SSM parameter or EventBridge rule disable) to pause the whole pipeline instantly |
 | IaC | CDK (Python, to match your stack) — everything above defined as code, not clicked in the console, so it's reproducible and reviewable |
 
 ## 3. Decisions (settled)
 
-**Reply detection: Gmail API.** Send and poll via OAuth against Matt's
-actual Gmail account. One-time setup: a Google Cloud project + OAuth
-consent + refresh token in Secrets Manager. **Gotcha, confirmed
-2026-09-02:** an OAuth consent screen left in "Testing" publishing status
-issues refresh tokens that expire after 7 days — this will look like it
-works, then silently stop a week later. Move the consent screen to "In
-production" before generating the real refresh token (see
-`setup-runbook.md` §2 for what that involves).
+**Reply detection: Gmail IMAP + App Password — corrected 2026-09-02.**
+The original plan (Gmail API via OAuth) hit a real wall: `gmail.send`/
+`gmail.readonly` are both Google "sensitive" scopes, and moving an
+External app to production with sensitive scopes requires a security
+assessment (2-4 weeks) plus domain-ownership verification via Search
+Console — wildly disproportionate for a single-user personal tool, not
+just a permissions checkbox. Confirmed live: Google's Publish App flow
+actually asked for a domain.
+
+Replacement needs no OAuth at all: Gmail App Passwords still work for
+regular (non-Workspace) accounts in 2026 — a 16-character credential
+generated once at myaccount.google.com/apppasswords (requires 2-Step
+Verification already enabled), used with plain IMAP to poll for the "ok"
+reply. No consent screen, no scope review, no domain, no 7-day expiry, no
+Google Cloud project at all. Sending stays on SES (unchanged) — this only
+replaces how replies get detected. Trade-off worth naming: an app
+password is a static credential until revoked, not a short-lived OAuth
+token — store it in Secrets Manager the same way, and revoking/rotating
+it just means generating a new one at the same Google Account page.
 
 **Submission mechanism: Playwright, local execution, from day one —
 corrected 2026-09-02.** The original design planned "API-first" auto-
@@ -420,9 +431,10 @@ comp/competitor criteria (§3), `applicant-profile.json` filled in.
   This same profile is what the local Submission Worker uses too, not
   just deployment. **One follow-up still open: delete the temporary root
   access key used to bootstrap this** (setup-runbook.md §1).
-- **A Google Cloud project for Gmail API OAuth** — free, ~10 minutes,
-  still not done. Setup steps: `setup-runbook.md` §2, including the
-  Testing-vs-Production gotcha from §3 above.
+- ~~A Google Cloud project for Gmail API OAuth~~ — **no longer needed,
+  corrected 2026-09-02** (see §3 — switched to IMAP + App Password).
+- **A Gmail App Password** — 2 minutes once 2-Step Verification is
+  confirmed on. Setup steps: `setup-runbook.md` §2.
 - Once that exists: stand up the CDK foundation (§6, phase 1) that
   everything else attaches to.
 
