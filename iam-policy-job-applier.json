@@ -19,7 +19,7 @@
         "cloudformation:ExecuteChangeSet",
         "cloudformation:DeleteChangeSet"
       ],
-      "Resource": "arn:aws:cloudformation:us-west-2:ACCOUNT_ID:stack/job-applier-*/*"
+      "Resource": "arn:aws:cloudformation:us-east-1:ACCOUNT_ID:stack/job-applier-*/*"
     },
     {
       "Sid": "CDKBootstrap",
@@ -33,10 +33,10 @@
         "ssm:GetParameter"
       ],
       "Resource": [
-        "arn:aws:cloudformation:us-west-2:ACCOUNT_ID:stack/CDKToolkit/*",
-        "arn:aws:s3:::cdk-*-assets-ACCOUNT_ID-us-west-2",
-        "arn:aws:s3:::cdk-*-assets-ACCOUNT_ID-us-west-2/*",
-        "arn:aws:ssm:us-west-2:ACCOUNT_ID:parameter/cdk-bootstrap/*"
+        "arn:aws:cloudformation:us-east-1:ACCOUNT_ID:stack/CDKToolkit/*",
+        "arn:aws:s3:::cdk-*-assets-ACCOUNT_ID-us-east-1",
+        "arn:aws:s3:::cdk-*-assets-ACCOUNT_ID-us-east-1/*",
+        "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/cdk-bootstrap/*"
       ]
     },
     {
@@ -57,7 +57,7 @@
         "lambda:CreateAlias",
         "lambda:UpdateAlias"
       ],
-      "Resource": "arn:aws:lambda:us-west-2:ACCOUNT_ID:function:job-applier-*"
+      "Resource": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:job-applier-*"
     },
     {
       "Sid": "DynamoDBTables",
@@ -78,8 +78,8 @@
         "dynamodb:TagResource"
       ],
       "Resource": [
-        "arn:aws:dynamodb:us-west-2:ACCOUNT_ID:table/job-applier-*",
-        "arn:aws:dynamodb:us-west-2:ACCOUNT_ID:table/job-applier-*/index/*"
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/job-applier-*",
+        "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/job-applier-*/index/*"
       ]
     },
     {
@@ -115,7 +115,7 @@
         "sqs:DeleteMessage",
         "sqs:TagQueue"
       ],
-      "Resource": "arn:aws:sqs:us-west-2:ACCOUNT_ID:job-applier-*"
+      "Resource": "arn:aws:sqs:us-east-1:ACCOUNT_ID:job-applier-*"
     },
     {
       "Sid": "EventBridge",
@@ -133,8 +133,8 @@
         "scheduler:GetSchedule"
       ],
       "Resource": [
-        "arn:aws:events:us-west-2:ACCOUNT_ID:rule/job-applier-*",
-        "arn:aws:scheduler:us-west-2:ACCOUNT_ID:schedule/default/job-applier-*"
+        "arn:aws:events:us-east-1:ACCOUNT_ID:rule/job-applier-*",
+        "arn:aws:scheduler:us-east-1:ACCOUNT_ID:schedule/default/job-applier-*"
       ]
     },
     {
@@ -145,8 +145,8 @@
         "bedrock:InvokeModelWithResponseStream"
       ],
       "Resource": [
-        "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude*",
-        "arn:aws:bedrock:us-west-2:ACCOUNT_ID:inference-profile/*claude*"
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude*",
+        "arn:aws:bedrock:us-east-1:ACCOUNT_ID:inference-profile/*claude*"
       ]
     },
     {
@@ -165,7 +165,7 @@
         "ses:SendEmail",
         "ses:SendRawEmail"
       ],
-      "Resource": "arn:aws:ses:us-west-2:ACCOUNT_ID:identity/*",
+      "Resource": "arn:aws:ses:us-east-1:ACCOUNT_ID:identity/*",
       "Condition": {
         "StringLike": {
           "ses:FromAddress": "*@gmail.com"
@@ -194,7 +194,7 @@
         "secretsmanager:DescribeSecret",
         "secretsmanager:TagResource"
       ],
-      "Resource": "arn:aws:secretsmanager:us-west-2:ACCOUNT_ID:secret:job-applier-*"
+      "Resource": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:job-applier-*"
     },
     {
       "Sid": "IAMScopedToProjectRoles",
@@ -233,9 +233,9 @@
         "logs:FilterLogEvents"
       ],
       "Resource": [
-        "arn:aws:cloudwatch:us-west-2:ACCOUNT_ID:alarm:job-applier-*",
-        "arn:aws:logs:us-west-2:ACCOUNT_ID:log-group:/aws/lambda/job-applier-*",
-        "arn:aws:logs:us-west-2:ACCOUNT_ID:log-group:/aws/lambda/job-applier-*:*"
+        "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:job-applier-*",
+        "arn:aws:logs:us-east-1:ACCOUNT_ID:log-group:/aws/lambda/job-applier-*",
+        "arn:aws:logs:us-east-1:ACCOUNT_ID:log-group:/aws/lambda/job-applier-*:*"
       ]
     },
     {
@@ -247,7 +247,7 @@
         "sns:Publish",
         "sns:TagResource"
       ],
-      "Resource": "arn:aws:sns:us-west-2:ACCOUNT_ID:job-applier-*"
+      "Resource": "arn:aws:sns:us-east-1:ACCOUNT_ID:job-applier-*"
     },
     {
       "Sid": "ECRForContainerImages",
@@ -263,7 +263,7 @@
         "ecr:CompleteLayerUpload",
         "ecr:BatchGetImage"
       ],
-      "Resource": "arn:aws:ecr:us-west-2:ACCOUNT_ID:repository/job-applier-*"
+      "Resource": "arn:aws:ecr:us-east-1:ACCOUNT_ID:repository/job-applier-*"
     },
     {
       "Sid": "ECRAuthGlobal",
@@ -289,7 +289,7 @@
       "Resource": "*",
       "Condition": {
         "StringLike": {
-          "ecs:cluster": "arn:aws:ecs:us-west-2:ACCOUNT_ID:cluster/job-applier-*"
+          "ecs:cluster": "arn:aws:ecs:us-east-1:ACCOUNT_ID:cluster/job-applier-*"
         }
       }
     },
