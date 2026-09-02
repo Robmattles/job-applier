@@ -413,10 +413,22 @@ NEEDS_REVIEW for Matt rather than silently shipping or discarding it.
    (queue URLs come from CDK outputs/env vars instead, so nothing
    actually needs it yet) — bundle the fix into a future policy update
    rather than a one-off elevation.
-2. **Ingestion** — connectors for direct Greenhouse/Lever/Ashby polling,
-   the name-probing discovery logic that grows `known_companies`, and
-   Himalayas/Jobicy/RemoteOK; dedup/filter logic; freshness stored, not
-   gated.
+2. ~~**Ingestion**~~ — **done 2026-09-02.** Two Lambdas in
+   `cdk/lambda_src/`, sharing a common layer (title regex, three-layer
+   remote detection, ATS clients, DynamoDB store helpers — all stdlib,
+   no bundling needed): `job-applier-ingest-known-companies` (direct
+   Greenhouse/Lever/Ashby polling) and `job-applier-ingest-boards`
+   (Himalayas/Jobicy/RemoteOK + name-probing discovery). Both run every
+   4 hours via EventBridge. `known_companies` seeded with the 19
+   live-tested companies (`cdk/scripts/seed_known_companies.py` — a
+   one-time operational script, not part of the stack, since seeding
+   data isn't infrastructure). Smoke-tested live: one
+   `ingest_known_companies` run → 306 title-matched, 299 new postings.
+   One `ingest_boards` run → grew `known_companies` from 19 to 48 (29
+   auto-discovered — Databricks and Fivetran alongside KoBold Metals and
+   Cresta, names nobody typed in) and added 57 more postings. 356 total
+   postings in the table after both runs, before phase 3 (scoring) even
+   exists to consume them yet.
 3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, ramped
    weekly cap (§5).
 4. **Generation** — lane-specific structured-content rewrite against the
