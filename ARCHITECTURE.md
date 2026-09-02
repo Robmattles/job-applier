@@ -314,10 +314,11 @@ comp/competitor criteria (§3). What's left is infrastructure, and none of
 it is something I can do without you:
 
 - **Scoped AWS credentials** — a dedicated IAM user/role, not root (see
-  least-privilege note in §5). I can hand you the exact policy JSON to
-  create it with.
+  least-privilege note in §5). Policy drafted: `iam-policy-job-applier.json`.
+  Setup steps: `setup-runbook.md` §1.
 - **A Google Cloud project for Gmail API OAuth** — free, ~10 minutes,
-  one-time setup for send + reply-detection.
+  one-time setup for send + reply-detection. Setup steps:
+  `setup-runbook.md` §2.
 - Once both exist: stand up the CDK foundation (§6, phase 1) that
   everything else attaches to.
 
