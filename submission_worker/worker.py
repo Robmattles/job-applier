@@ -82,7 +82,34 @@ _FILLABLE_DOMAINS = ("jobs.ashbyhq.com", "job-boards.greenhouse.io", "jobs.lever
 
 
 def _is_fillable_url(url: str) -> bool:
+    """A fast, pre-navigation guess — good enough for the "form:" line
+    printed before the browser even opens, not authoritative. See
+    _page_has_ats_frame for why the real decision can't be made from the
+    URL string alone."""
     return any(d in (url or "") for d in _FILLABLE_DOMAINS)
+
+
+def _page_has_ats_frame(page) -> bool:
+    """The real fillability signal, checked after navigation: does any
+    frame on the loaded page — not just the top-level URL — belong to a
+    known ATS domain.
+
+    Confirmed live 2026-09-03: Fivetran's resolved apply_url is
+    `www.fivetran.com/careers/job?gh_jid=...` — their own domain, not
+    `job-boards.greenhouse.io` — so _is_fillable_url said no and the
+    worker opened it as a plain listing. The actual Greenhouse embed
+    (`job-boards.greenhouse.io/embed/job_app`, 38 real fields) was sitting
+    right there in an iframe the whole time; fill_form already scans every
+    frame regardless of the top page's domain, so the only thing wrong
+    was the yes/no gate in front of it checking the wrong thing. Many
+    employers proxy Greenhouse (and, plausibly, Ashby/Lever) through their
+    own domain this way — checking frame domains instead of the outer URL
+    handles all of them, not just this one company's URL shape, the same
+    generality lesson as _reveal_form's tab-click list."""
+    for frame in page.frames:
+        if any(d in (frame.url or "") for d in _FILLABLE_DOMAINS):
+            return True
+    return False
 
 
 def _session():
@@ -678,7 +705,6 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
     application_id = app["application_id"]
     source = application_id.split("#", 1)[0]
     url = _apply_url(app)
-    fillable = _is_fillable_url(url)
 
     print("=" * 70)
     print(f"{app.get('company_name','')} — {app.get('title','')}")
@@ -691,17 +717,20 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
     values = _safe_autofill_values(profile)
     print(f"  documents: {', '.join(documents) or 'none'} (in {workdir})")
 
-    if not fillable:
-        why = f"{source} is an aggregator listing" if source in AGGREGATOR_SOURCES else "no resolved application form"
-        print(f"\n  NOTE: {why}, not a fillable form.")
-        print("  Opening it for you to navigate to the employer's real form yourself.")
-    elif source in AGGREGATOR_SOURCES:
-        print(f"\n  NOTE: {source}-sourced, but resolved to a real form on {url.split('/')[2]} — filling it normally.")
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
         page.goto(url, wait_until="networkidle", timeout=45000)
+
+        # The real fillability check happens here, after navigation, not
+        # from the URL string beforehand — see _page_has_ats_frame.
+        fillable = _page_has_ats_frame(page)
+        if not fillable:
+            why = f"{source} is an aggregator listing" if source in AGGREGATOR_SOURCES else "no ATS form found on this page"
+            print(f"\n  NOTE: {why}, not a fillable form.")
+            print("  Opening it for you to navigate to the employer's real form yourself.")
+        elif source in AGGREGATOR_SOURCES or url.split("/")[2] not in _FILLABLE_DOMAINS:
+            print(f"\n  NOTE: resolved to a real ATS form embedded on {url.split('/')[2]} — filling it normally.")
 
         report = {"filled": [], "skipped_sensitive": [], "unmapped": [], "uploads": [],
               "skipped_autofill": [], "_open_questions": []}
