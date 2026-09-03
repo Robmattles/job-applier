@@ -295,6 +295,75 @@ def _match_field(descriptor: str):
     return None
 
 
+def _open_application_tab(page):
+    """Some employer career sites (confirmed live 2026-09-03: Airbnb's)
+    wrap the Greenhouse embed in their own "Role overview" / "Application"
+    tab layout, with the embed hidden — a zero bounding box, `is_visible`
+    False on every field inside it — until the "Application" tab is
+    clicked. Nothing about `job-boards.greenhouse.io/{co}/jobs/{id}`
+    signals which pattern a given employer uses; phData's page showed the
+    form immediately, Airbnb's doesn't, and there's no way to know in
+    advance which this one is. So: look for the tab, click it if present,
+    and do nothing if not — a plain redirect-and-show-the-form employer
+    page has no "Application" text for this to match, and a no-op click
+    attempt is harmless there."""
+    for sel in ("text=Application", "[role=tab]:has-text('Application')",
+                "button:has-text('Application')", "a:has-text('Application')"):
+        try:
+            el = page.query_selector(sel)
+        except Exception:  # noqa: BLE001
+            continue
+        if el and el.is_visible():
+            try:
+                el.click()
+            except Exception:  # noqa: BLE001 — not fatal; _wait_for_form below just won't find much
+                pass
+            return
+
+
+def _wait_for_form(page, timeout_ms: int = 15000, min_fields: int = 5):
+    """Waits until the page has at least `min_fields` visible
+    input/textarea/select elements across all frames combined, rather
+    than a fixed sleep.
+
+    Confirmed live 2026-09-03, in two stages. First: a plain
+    `wait_for_timeout(3000)` reported "filled: (none)" against a real
+    Airbnb Greenhouse application — the embed genuinely hadn't rendered
+    yet at the 3-second mark. Second, the first fix for that (wait for
+    *any* field, any frame) was itself wrong and looked like it worked
+    right up until it didn't: Greenhouse's host page carries its own
+    single stray input before the embed iframe finishes loading, and the
+    reCAPTCHA iframe carries one too — "at least one field exists
+    somewhere" is satisfied by either of those long before the real
+    ~30-field form does, so it returned early just the same, only a
+    little later than the fixed sleep had. A form worth calling "loaded"
+    has more than one or two fields; requiring a real count is what
+    actually distinguishes "the embed is here" from "a stray input on
+    the host page is here."
+
+    min_fields=5 is deliberately low relative to a typical Greenhouse
+    form (15-30 fields) — it only has to clear "this is obviously not
+    just the host page's furniture," not match the exact final count,
+    since fields can still be streaming in via React after this returns
+    and fill_form's own per-field visibility check handles that.
+
+    Falls through silently on timeout rather than raising — an
+    aggregator listing or a form that genuinely never renders shouldn't
+    crash the worker; fill_form on a sparse page just reports whatever
+    it can, same as it always could."""
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        total = 0
+        for frame in page.frames:
+            try:
+                total += len(frame.query_selector_all("input, textarea, select"))
+            except Exception:  # noqa: BLE001 — a frame mid-navigation isn't fatal, just recount
+                continue
+        if total >= min_fields:
+            return
+        page.wait_for_timeout(250)
+
+
 def fill_form(page, values: dict, documents: dict, dry_run: bool = False) -> dict:
     """Returns a report of what was filled, skipped, and left for Matt.
 
@@ -597,9 +666,8 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
         report = {"filled": [], "skipped_sensitive": [], "unmapped": [], "uploads": [],
               "skipped_autofill": [], "_open_questions": []}
         if fillable:
-            # The Greenhouse embed iframe finishes loading well after the
-            # host page does; scanning too early finds an empty form.
-            page.wait_for_timeout(3000)
+            _open_application_tab(page)
+            _wait_for_form(page)
             report = fill_form(page, values, documents, dry_run=dry_run)
 
         print("\n  filled:")
