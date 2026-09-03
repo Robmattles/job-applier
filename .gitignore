@@ -1,1 +1,6 @@
 .DS_Store
+.venv/
+__pycache__/
+*.pyc
+# Abandoned Gmail OAuth path (ARCHITECTURE.md §3 switched to IMAP + App Password)
+client_secret_*.apps.googleusercontent.com.json

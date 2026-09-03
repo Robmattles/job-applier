@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 .cdk.staging/
 scripts/__pycache__/
+
+# Vendored wheels for the PDF layer — rebuild with render_layer/build.sh
+lambda_src/render_layer/python/

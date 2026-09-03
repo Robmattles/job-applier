@@ -429,19 +429,121 @@ NEEDS_REVIEW for Matt rather than silently shipping or discarding it.
    Cresta, names nobody typed in) and added 57 more postings. 356 total
    postings in the table after both runs, before phase 3 (scoring) even
    exists to consume them yet.
-3. **Scoring** — Bedrock evidence-audit prompt, fit threshold, ramped
-   weekly cap (§5).
-4. **Generation** — lane-specific structured-content rewrite against the
-   accomplishment inventory.
-5. **QA pass** — all four passes (§4), NEEDS_REVIEW path; fixed-template
-   rendering to single-column/clean-parse-validated PDF.
-6. **Approval loop** — send + reply detection, TTL on pending approvals.
-7. **Submission** — local Playwright worker, `applicant-profile.json`
-   autofill + grounded answer generation + NEEDS_REVIEW handoff (§3);
-   confirmation capture.
-8. **Reporting** — weekly funnel digest email, CloudWatch dashboard.
-9. **Guardrails hardening** — ramp schedule, budget alarm, kill switch,
-   audit trail.
+3. ~~**Scoring**~~ — **done 2026-09-02.** `ScoringStack`: `job-applier-
+   fit-scoring`, evidence-audit prompt against the accomplishment
+   inventory, remote/comp hard filters, threshold + weekly-cap gate (§5).
+   Model temporarily Sonnet 4.5, not the intended cheap Haiku 4.5 (its
+   use-case-details gate is still unresolved — see code comment). Two
+   real bugs found and fixed against live data rather than just at
+   review: (1) a manual retry overlapping the EventBridge schedule ran
+   two concurrent executions, double-scoring one posting and drifting
+   the weekly-cap count — fixed with a self-releasing DynamoDB lock
+   (Lambda's own `reserved_concurrent_executions` was unavailable, this
+   account's account-wide concurrency floor is already at its minimum);
+   (2) the weekly-cap gate only filled *empty* slots rather than
+   re-ranking continuously, so a posting could get stuck in QUALIFIED
+   just for being scored first even after a genuinely better-fitting one
+   showed up later — fixed to re-rank the full contender pool every run
+   per §5's own "always highest fit-score first" rule, demoting a
+   displaced posting back to SCORED rather than losing it. Live-verified
+   against a 609-posting real backlog (a one-time pile-up from repeated
+   dev-time ingestion runs, not real steady-state volume): raised
+   `MAX_POSTINGS_PER_RUN` 25→60 and `AGE_PENALTY_PER_DAY` in the
+   freshness blend 0.5→3 (Matt's call, after real scores clustered in a
+   ~70-82 band that didn't differentiate much on fit_score alone).
+4. ~~**Generation**~~ — **done 2026-09-02.** `GenerationStack`:
+   `job-applier-generation`, SQS-triggered off `generation_queue`
+   (fit-scoring enqueues on every QUALIFIED promotion) rather than
+   polling. Opus 4.5 (§1's "higher-quality model"), affordable at this
+   stage's weekly-capped volume. Writes structured content — headline,
+   summary, per-bullet-sourced résumé bullets, skills section, cover
+   letter — to a new `applications_table` row, one per posting.
+   Live-verified on the first 10 real QUALIFIED postings: grounded,
+   specific, cites real record ids, no invented claims on manual
+   inspection.
+5. ~~**QA pass**~~ — **LLM half done 2026-09-02**, rendering not yet
+   built. `QAStack`: `job-applier-qa`, DynamoDB-Streams-triggered off
+   `applications_table` (filtered to `NEW_IMAGE.status == "GENERATED"`,
+   so its own writes back never re-trigger it). Two separately-framed
+   critic calls rather than four round-trips: pass A combines
+   authenticity + grounding + specificity (§4 passes 1-3 share a "critic
+   reviewing the draft, empowered to rewrite in place" frame); pass B is
+   the recruiter/ATS adversarial review (§4 pass 4) against the actual
+   posting. Capped at 2 revision loops (§4 guardrail); unresolved →
+   NEEDS_REVIEW, never silently shipped or dropped. Not yet live-tested
+   end-to-end against real QUALIFIED postings. Fixed-template PDF
+   rendering (the other half of this phase) not yet built.
+6. ~~**Approval loop**~~ — **done 2026-09-03.** `ApprovalStack`:
+   `job-applier-approval-email` (DynamoDB-Streams off RENDERED, sends
+   one SES email per posting with fit rationale, both reasons-to-reject
+   and reasons-to-interview, and the PDFs as **attachments** — a
+   presigned S3 URL dies with the Lambda's temporary credentials, hours
+   inside the 5-day approval window) and `job-applier-reply-listener`
+   (EventBridge every 10 min, Gmail IMAP per §3). Live-verified: replied
+   "ok" → APPROVED → enqueued to the submission queue.
+   `classify_reply` has real tests (`cdk/tests/`, 28 cases) because it
+   is the gate in front of submitting under Matt's name — it approves
+   only on a short unambiguous affirmative, so "ok but change X" and
+   "not ok" both land in AMBIGUOUS and stay PENDING.
+   Four IMAP realities found only by running it against a real mailbox,
+   each of which silently broke approvals: (a) `SUBJECT "JA-"` matched
+   J.A. Henckels order confirmations and a stranger's homework thread —
+   Gmail's subject search is token-based, so it now searches
+   `FROM <matt> SINCE <14d>` and matches tokens client-side; (b) Gmail
+   marks self-sent mail read, so the original `UNSEEN` filter found zero
+   replies — idempotency now comes from the PENDING row instead;
+   (c) Gmail wraps the "On … wrote:" attribution when the sender name is
+   long, so a single-line `On .*wrote:` quote-stripper let the whole
+   quoted original count as reply text and turned a clean "ok" into
+   AMBIGUOUS; (d) INBOX-scoped search misses any thread archived after
+   replying — it searches the `\All` folder now. Not fixed, deliberately:
+   a *deleted* approval email is unrecoverable and stays PENDING until
+   TTL, which is the correct reading of deleting it.
+   Known gap: NEEDS_REVIEW applications reach Matt through no channel at
+   all — see phase 8.
+7. **Submission** — **built 2026-09-03, not yet run against a real
+   approved application.** `submission_worker/` (local, not AWS, per
+   §3): drains the submission queue, opens a visible Chrome window,
+   fills SAFE_AUTOFILL fields + résumé/cover-letter uploads, and hands
+   the form to Matt. Verified live against a real Greenhouse form
+   (phData 8002644) in dry-run: 5 fields filled, 2 uploads matched, and
+   — the part that matters — gender/ethnicity/veteran/disability all
+   correctly refused, both custom screening questions left blank rather
+   than guessed. It never clicks submit and never touches the
+   reCAPTCHA those forms carry.
+   One structural finding: `job-boards.greenhouse.io/{co}/jobs/{id}`
+   302s to the employer's own careers page and embeds the real form in
+   an `/embed/job_app` iframe, so the worker scans every frame — a
+   top-document scan reported success while finding zero of nineteen
+   fields.
+   Still open: aggregator-sourced postings (himalayas/remoteok/jobicy,
+   9 of 26 applications so far) have no resolvable form and just open
+   the listing for Matt; grounded answer *generation* for custom
+   screening questions isn't built (they're listed, not drafted).
+8. ~~**Reporting**~~ — **done 2026-09-03.** `OpsStack`:
+   `job-applier-digest` (Mondays 13:00 UTC) sends the funnel — postings
+   by state, applications by stage, what was submitted, and the approval
+   rate — framed around §5's actual question, whether the weekly cap has
+   earned a raise. The sweeper also closes the gap phase 6 left open:
+   NEEDS_REVIEW applications now get emailed with the specific QA
+   findings that stopped them, once each, instead of aging out unseen.
+9. **Guardrails hardening** — **partially done 2026-09-03.**
+   `job-applier-sweeper` (every 30 min) fixes the systemic fragility
+   this build kept hitting: every stream-triggered stage starts at
+   `LATEST`, so anything reaching a trigger state while that stage was
+   absent, redeploying, or throttled is stranded permanently and
+   silently. It happened three times by hand during buildout; the first
+   real sweeper run found **13** more genuinely stalled applications.
+   Unsticking is deliberately dumb — re-write a row's status onto
+   itself, which emits a stream event the downstream filter matches.
+   The sweeper's own first run then demonstrated why the weekly cap
+   needs enforcing at *both* ends: it pushed displaced applications
+   onward and four approval emails went out for postings the re-rank had
+   already dropped to SCORED, past the cap. Both the sweeper and the
+   approval-email Lambda now check that the posting is still QUALIFIED
+   before acting — the cap lives on the posting, not the application.
+   Also done: a CloudWatch billing alarm at $50/month (§5 cost ceiling).
+   Still open: the kill switch, and the ramp schedule is still manual.
 
 ## 7. What's needed to start
 

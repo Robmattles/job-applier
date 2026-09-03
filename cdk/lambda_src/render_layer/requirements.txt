@@ -1,0 +1,7 @@
+# Vendored into python/ as manylinux2014 x86_64 / cp313 wheels — see build.sh.
+# Pinned: a silent wheel upgrade under the renderer is not something a
+# résumé PDF should discover in production.
+fpdf2==2.8.3
+fonttools==4.64.0
+pillow==12.2.0
+defusedxml==0.7.1

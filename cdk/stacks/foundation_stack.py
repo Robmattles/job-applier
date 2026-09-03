@@ -89,6 +89,10 @@ class FoundationStack(Stack):
             point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
                 point_in_time_recovery_enabled=True
             ),
+            # Streams QA (§6 phase 5) off Generation's writes — NEW_IMAGE is
+            # enough since QAStack's event source filters on the new
+            # status itself, not a before/after diff.
+            dynamo_stream=dynamodb.StreamViewType.NEW_IMAGE,
         )
         self.applications_table.add_global_secondary_index(
             index_name="status-index",

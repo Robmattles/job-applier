@@ -59,6 +59,8 @@
         "lambda:DeleteFunction",
         "lambda:GetFunction",
         "lambda:ListFunctions",
+        "lambda:GetFunctionConfiguration",
+        "lambda:ListLayerVersions",
         "lambda:AddPermission",
         "lambda:RemovePermission",
         "lambda:InvokeFunction",
@@ -165,7 +167,9 @@
       "Effect": "Allow",
       "Action": [
         "bedrock:ListInferenceProfiles",
-        "bedrock:GetInferenceProfile"
+        "bedrock:GetInferenceProfile",
+        "bedrock:PutUseCaseForModelAccess",
+        "bedrock:GetUseCaseForModelAccess"
       ],
       "Resource": "*"
     },
