@@ -4,6 +4,7 @@ ATS platform's free public API, applies the title + remote filter, and
 dedups into `postings`.
 """
 from job_applier_common import ats_clients, companies_store, filters, postings_store
+from job_applier_common import inventory_store
 
 FETCHERS = {
     "greenhouse": ats_clients.fetch_greenhouse_jobs,
@@ -13,6 +14,9 @@ FETCHERS = {
 
 
 def handler(event, context):
+    if inventory_store.halt_if_paused("ingestion (direct ATS polling)"):
+        return {"halted": "kill_switch"}
+
     stats = {
         "companies_checked": 0,
         "jobs_seen": 0,

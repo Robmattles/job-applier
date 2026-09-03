@@ -447,6 +447,24 @@ def _pass2_gate(stats: dict):
 
 
 def handler(event, context):
+    # §5 kill switch. Checked before the lock so a paused run doesn't
+    # take one and make the next real run look like a concurrent
+    # execution.
+    if inventory_store.halt_if_paused("fit scoring"):
+        return {"halted": "kill_switch"}
+
+    event = event or {}
+    # A re-score of the existing backlog wants pass 1 without pass 2.
+    # Running the gate between batches promotes whatever happened to be
+    # re-scored first, kicks off Opus generation for it, and then
+    # displaces it on a later batch once a better posting comes back —
+    # paying for a draft nobody will ever see. `skip_gate` scores
+    # without ranking; run one normal invocation at the end to gate the
+    # whole re-scored pool at once, which is the comparison §5's
+    # "always highest fit-score first" actually asks for.
+    skip_gate = bool(event.get("skip_gate"))
+    only_gate = bool(event.get("only_gate"))
+
     table = _get_table()
     try:
         _acquire_lock(table)
@@ -465,8 +483,12 @@ def handler(event, context):
         "deduped_near_duplicate_title": 0,
     }
     try:
-        _pass1_score(stats)
-        _pass2_gate(stats)
+        if not only_gate:
+            _pass1_score(stats)
+        if not skip_gate:
+            _pass2_gate(stats)
+        else:
+            stats["gate"] = "skipped"
     finally:
         _release_lock(table)
     print(f"job-applier-fit-scoring stats: {stats}")

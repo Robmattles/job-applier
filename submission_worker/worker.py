@@ -39,6 +39,7 @@ than guessing at a form structure, per §3's "straight to NEEDS_REVIEW
 rather than building a fourth apply pathway."
 """
 import argparse
+import atexit
 import json
 import os
 import sys
@@ -53,6 +54,12 @@ QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/job-applier-submissi
 APPLICATIONS_TABLE = "job-applier-applications"
 DOCUMENTS_BUCKET = "job-applier-documents-ACCOUNT_ID-us-east-1"
 PROFILE_KEY = "source/applicant-profile.json"
+RAMP_CONFIG_KEY = "config/ramp.json"
+
+# The watcher (watcher.py) uses this to tell "a submission is in progress"
+# from "the queue is drained," so it doesn't open a second Terminal on
+# top of one Matt is already typing into.
+RUN_LOCK = os.path.expanduser("~/.job-applier-worker.lock")
 
 # Sources whose stored URL is a listing page, not an application form.
 AGGREGATOR_SOURCES = {"himalayas", "remoteok", "jobicy"}
@@ -60,6 +67,52 @@ AGGREGATOR_SOURCES = {"himalayas", "remoteok", "jobicy"}
 
 def _session():
     return boto3.Session(profile_name=PROFILE, region_name=REGION)
+
+
+def is_paused(session=None) -> bool:
+    """ARCHITECTURE.md §5 kill switch, the same `config/ramp.json` flag
+    every Lambda reads. Submission is the half of §5's "halts ingestion
+    and submission instantly" that lives on this machine, so the flag has
+    to reach here too — a paused pipeline that still files applications
+    isn't paused.
+
+    Checked once per application rather than once per process: a --loop
+    run can sit open for an hour, and flipping the switch should stop the
+    *next* one, not only the next process.
+
+    Fails open on an unreadable config, matching the Lambda side."""
+    try:
+        s3 = (session or _session()).client("s3")
+        obj = s3.get_object(Bucket=DOCUMENTS_BUCKET, Key=RAMP_CONFIG_KEY)
+        return bool(json.loads(obj["Body"].read().decode("utf-8")).get("paused", False))
+    except Exception as e:  # noqa: BLE001
+        print(f"kill switch unreadable ({e}); continuing unpaused")
+        return False
+
+
+def _take_run_lock():
+    """Best-effort, single-machine. Stale locks (a crashed worker) are
+    reclaimed by checking whether the recorded pid is still alive."""
+    try:
+        existing = int(open(RUN_LOCK).read().strip())
+        os.kill(existing, 0)
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        pass
+    else:
+        print(f"another worker is already running (pid {existing})")
+        return False
+    with open(RUN_LOCK, "w") as fh:
+        fh.write(str(os.getpid()))
+    atexit.register(_release_run_lock)
+    return True
+
+
+def _release_run_lock():
+    try:
+        if int(open(RUN_LOCK).read().strip()) == os.getpid():
+            os.unlink(RUN_LOCK)
+    except (FileNotFoundError, ValueError):
+        pass
 
 
 def _apply_url(app: dict) -> str:
@@ -374,11 +427,27 @@ def _click_submit(page) -> bool:
     return False
 
 
-def _offer_drafts(session, open_questions: list, app: dict, profile: dict, auto: bool = False):
-    """Draft an answer per open question and let Matt accept, edit, or
-    skip each one. Nothing here is ever filled without him seeing it —
-    these answers go into a real application, and unlike a résumé bullet
-    nothing downstream reviews them again."""
+def _offer_drafts(session, open_questions: list, app: dict, profile: dict):
+    """Draft an answer per open question and fill it straight into the
+    browser field — no terminal prompt in between.
+
+    Deliberately not gated behind a terminal accept/edit/skip step, and
+    deliberately not tied to --review vs auto-submit. Those two things
+    look like the same knob and aren't: --review controls who clicks
+    Submit, this controls who writes the answer. An earlier version
+    threaded `auto` through here too, which meant a --review run (the
+    one Matt asked to run first, precisely so he could look before
+    anything went out) sat blocked on an `[a]ccept/[e]dit/[s]kip?`
+    prompt in a Terminal window he had no reason to be watching, while
+    the actual field he was looking at in the browser stayed empty —
+    exactly the "I don't want to write that" friction this exists to
+    remove.
+
+    The browser field is the review surface, same as every other field
+    on the form: the draft lands there filled in, visible, editable, and
+    nothing submits until Matt clicks Submit himself (--review) or
+    _submit_blockers clears it (auto). A NEEDS_REVIEW question still
+    never gets a draft — those stay blank for him, unchanged."""
     import answers as answers_module
 
     bedrock = session.client("bedrock-runtime")
@@ -436,22 +505,8 @@ def _offer_drafts(session, open_questions: list, app: dict, profile: dict, auto:
         for line in (draft.get("answer") or "").splitlines():
             print(f"     {line}")
 
-        if auto:
-            handle.fill(draft["answer"])
-            print("     filled (auto).")
-            continue
-
-        choice = input("\n     [a]ccept / [e]dit / [s]kip? ").strip().lower()
-        if choice.startswith("a"):
-            handle.fill(draft["answer"])
-            print("     filled.")
-        elif choice.startswith("e"):
-            edited = input("     your answer: ").strip()
-            if edited:
-                handle.fill(edited)
-                print("     filled with your text.")
-        else:
-            print("     left blank.")
+        handle.fill(draft["answer"])
+        print("     filled — edit directly in the browser if this needs a change.")
 
 
 def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> str:
@@ -514,7 +569,7 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
                 print(f"    {line}")
 
         if report["_open_questions"] and not dry_run:
-            _offer_drafts(session, report["_open_questions"], app, profile, auto=auto)
+            _offer_drafts(session, report["_open_questions"], app, profile)
 
         print("\n" + "-" * 70)
         if dry_run:
@@ -560,8 +615,69 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
         )
         print("  recorded as NOT_SUBMITTED\n")
         return "not_submitted"
-    print("  left APPROVED — it stays in the queue for next time\n")
+    print("  left APPROVED — deferred an hour, then it comes back\n")
     return "skipped"
+
+
+def _defer(applications, application_id: str, seconds: int = 3600):
+    """Skipping means "later," not "give up" — but the queue can't express
+    that. maxReceiveCount is 3, so leaving a skipped message to redeliver
+    dead-letters a real approval on the third skip, and nothing re-enqueues
+    from the DLQ. So a skip deletes the message and marks the row instead:
+    the status stays APPROVED, `deferred_until` keeps it out of the way for
+    an hour, and _recover_orphans puts it back on the queue afterward."""
+    applications.update_item(
+        Key={"application_id": application_id},
+        UpdateExpression="SET deferred_until = :t",
+        ExpressionAttributeValues={":t": int(time.time()) + seconds},
+    )
+
+
+def _recover_orphans(sqs, applications) -> int:
+    """Re-enqueue APPROVED applications that have no message representing
+    them.
+
+    Every other stage in this pipeline turned out to need one of these
+    (that is what job-applier-sweeper is), and submission is no different:
+    an approval whose message dead-lettered, or was dropped by a crash
+    between receive and delete, is APPROVED forever with nothing coming to
+    collect it. Matt replied "ok" and would never hear another word.
+
+    Only runs when the queue reports fully empty. Those counts lag, so a
+    false empty is possible and would enqueue a duplicate — harmless,
+    since the second delivery finds the row already SUBMITTED and drops
+    it."""
+    attrs = sqs.get_queue_attributes(
+        QueueUrl=QUEUE_URL,
+        AttributeNames=["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"],
+    )["Attributes"]
+    if int(attrs["ApproximateNumberOfMessages"]) or int(attrs["ApproximateNumberOfMessagesNotVisible"]):
+        return 0
+
+    now = int(time.time())
+    orphans, kwargs = [], {
+        "FilterExpression": "#s = :approved",
+        "ExpressionAttributeNames": {"#s": "status"},
+        "ExpressionAttributeValues": {":approved": "APPROVED"},
+    }
+    while True:  # paginated, always — a bare scan returns partial results
+        resp = applications.scan(**kwargs)
+        orphans += resp.get("Items", [])
+        if "LastEvaluatedKey" not in resp:
+            break
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+    requeued = 0
+    for app in orphans:
+        if int(app.get("deferred_until", 0)) > now:
+            continue
+        sqs.send_message(
+            QueueUrl=QUEUE_URL,
+            MessageBody=json.dumps({"application_id": app["application_id"]}),
+        )
+        print(f"  re-enqueued orphaned approval {app['application_id']}")
+        requeued += 1
+    return requeued
 
 
 def main() -> int:
@@ -572,33 +688,71 @@ def main() -> int:
                         help="fill but never submit — you review and click submit yourself")
     args = parser.parse_args()
 
+    if not _take_run_lock():
+        return 0
+
     session = _session()
     sqs = session.client("sqs")
     applications = session.resource("dynamodb").Table(APPLICATIONS_TABLE)
 
+    recovered = False
     while True:
+        if is_paused(session):
+            print("kill switch is ON (config/ramp.json) — not submitting anything.")
+            print("turn it off with cdk/scripts/kill_switch.sh off")
+            return 0
+
         resp = sqs.receive_message(QueueUrl=QUEUE_URL, MaxNumberOfMessages=1, WaitTimeSeconds=5)
         messages = resp.get("Messages", [])
         if not messages:
+            # Once per run, before believing an empty queue means no work.
+            if not recovered:
+                recovered = True
+                if _recover_orphans(sqs, applications):
+                    continue
             print("nothing waiting in the submission queue")
             return 0
 
         message = messages[0]
+        receipt = message["ReceiptHandle"]
         application_id = json.loads(message["Body"])["application_id"]
         app = applications.get_item(Key={"application_id": application_id}).get("Item")
 
         if app is None:
             print(f"{application_id}: no application row, dropping message")
-            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=message["ReceiptHandle"])
+            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=receipt)
             continue
         if app.get("status") != "APPROVED":
             print(f"{application_id}: status is {app.get('status')}, not APPROVED — dropping")
-            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=message["ReceiptHandle"])
+            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=receipt)
             continue
 
-        outcome = process_application(app, dry_run=args.dry_run, auto=not args.review)
+        try:
+            outcome = process_application(app, dry_run=args.dry_run, auto=not args.review)
+        except Exception as e:  # noqa: BLE001
+            # A crash IS the case redelivery is for, so this one goes back
+            # on the queue rather than being deferred — released
+            # immediately instead of sitting invisible for the 30-minute
+            # visibility timeout.
+            print(f"{application_id}: {type(e).__name__}: {e}")
+            sqs.change_message_visibility(
+                QueueUrl=QUEUE_URL, ReceiptHandle=receipt, VisibilityTimeout=0
+            )
+            applications.update_item(
+                Key={"application_id": application_id},
+                UpdateExpression="SET last_error = :e, last_error_at = :t",
+                ExpressionAttributeValues={":e": f"{type(e).__name__}: {e}"[:400],
+                                           ":t": int(time.time())},
+            )
+            if not args.loop:
+                return 1
+            continue
+
         if outcome in ("submitted", "not_submitted"):
-            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=message["ReceiptHandle"])
+            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=receipt)
+        else:
+            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=receipt)
+            _defer(applications, application_id)
 
         if not args.loop:
             return 0

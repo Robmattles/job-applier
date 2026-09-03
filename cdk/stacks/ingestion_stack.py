@@ -19,6 +19,7 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_lambda as lambda_,
+    aws_s3 as s3,
 )
 from constructs import Construct
 
@@ -30,6 +31,7 @@ class IngestionStack(Stack):
         construct_id: str,
         postings_table: dynamodb.ITableV2,
         known_companies_table: dynamodb.ITableV2,
+        documents_bucket: s3.IBucket,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -46,6 +48,10 @@ class IngestionStack(Stack):
         common_env = {
             "POSTINGS_TABLE": postings_table.table_name,
             "KNOWN_COMPANIES_TABLE": known_companies_table.table_name,
+            # Only for the §5 kill switch in config/ramp.json — ingestion
+            # reads nothing else out of this bucket, hence the config/*
+            # scoped grants below rather than a whole-bucket read.
+            "DOCUMENTS_BUCKET": documents_bucket.bucket_name,
         }
 
         # ------------------------------------------------------------------
@@ -66,6 +72,7 @@ class IngestionStack(Stack):
         )
         postings_table.grant_read_write_data(self.ingest_known_companies_fn)
         known_companies_table.grant_read_data(self.ingest_known_companies_fn)
+        documents_bucket.grant_read(self.ingest_known_companies_fn, "config/*")
 
         # ------------------------------------------------------------------
         # SECONDARY: Himalayas/Jobicy/RemoteOK + name-probing discovery.
@@ -84,6 +91,7 @@ class IngestionStack(Stack):
         )
         postings_table.grant_read_write_data(self.ingest_boards_fn)
         known_companies_table.grant_read_write_data(self.ingest_boards_fn)
+        documents_bucket.grant_read(self.ingest_boards_fn, "config/*")
 
         # ------------------------------------------------------------------
         # Schedule — every 4 hours. Balances the <48h freshness preference

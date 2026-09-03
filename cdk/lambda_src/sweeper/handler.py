@@ -25,8 +25,10 @@ import os
 import time
 
 import boto3
+
 from boto3.dynamodb.conditions import Attr
 
+from job_applier_common import inventory_store
 from job_applier_common.dynamo_utils import scan_all
 
 APPROVAL_TO = os.environ["APPROVAL_TO_EMAIL"]
@@ -163,6 +165,9 @@ def _notify_needs_review(stats: dict):
 
 
 def handler(event, context):
+    if inventory_store.halt_if_paused("sweeper"):
+        return {"halted": "kill_switch"}
+
     stats = {"unstuck": 0, "skipped_displaced": 0, "needs_review_notified": 0}
     _unstick(stats)
     _notify_needs_review(stats)

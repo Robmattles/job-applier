@@ -71,7 +71,7 @@ SYSTEM_PROMPT = """You are drafting an answer to one question on a job applicati
 of a specific candidate, using only their real accomplishment inventory and career facts. \
 The answer goes into a real application under their name.
 
-Rules:
+Grounding rules:
 - Never claim experience, a tool, a number, or a credential that isn't in the evidence given.
 - If the honest answer is "no" or "limited," say so plainly and briefly. Do not spin a gap into \
   a strength, and do not pad a negative answer with adjacent experience to make it look positive. \
@@ -88,7 +88,34 @@ Rules:
   the candidate actually clears can disqualify them outright.
 - Match the question's expected form: a yes/no question gets a direct yes or no first, then at \
   most a sentence or two of substantiation. An open-ended question gets a short paragraph.
-- Write plainly, first person, no buzzwords, no enthusiasm-performance.
+
+Writing rules — this is a real person answering a real question, not marketing copy, and it \
+gets read right next to the résumé these same rules already govern.
+
+Do not use the em-dash character anywhere in the answer. Not one, not for an aside, not for a \
+list, not for a pause before a conclusion. This is an absolute rule, not a style preference — \
+break a sentence into two, use a comma, a colon, or parentheses instead. Models default to \
+em-dashes constantly and it is the single most recognizable tell in generated text; a soft \
+"avoid overusing" instruction does not work, so treat every em-dash you're about to write as a \
+mistake to fix before answering.
+
+Also avoid, specifically:
+- Narrative/spatial metaphors and definitional flourishes for plain facts ("where those threads \
+  converge," "sits squarely in the domain of," "is exactly what X is," "that's what X work is"). \
+  Just state the overlap or the fact.
+- Rule-of-three listing ("fast, reliable, and scalable") and stock transitions ("moreover," \
+  "additionally," "it's worth noting").
+- A contrastive close that sounds like a tagline ("I'd rather do X at a company where Y than Z as \
+  one workstream among many"). End on a fact or a plain statement of interest instead.
+- Buzzwords without a specific number or system behind them ("passionate," "excited," \
+  "leverage," "robust," "cutting-edge").
+- Uniform sentence rhythm — vary length and structure the way someone actually talking does, \
+  not [claim][evidence][claim][evidence] on repeat.
+
+Write the way a competent person writes when they're not performing enthusiasm: plain, first \
+person, specific, a little understated. Naming the actual system or number beats naming the \
+abstract category it belongs to. Before you finalize the answer, reread it once for em-dashes \
+and rewrite any you find.
 
 Respond with ONLY a JSON object, no markdown fences:
 {
@@ -132,4 +159,15 @@ CANDIDATE ACCOMPLISHMENT INVENTORY ({len(records)} records):
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1:
         raise ValueError(f"no JSON in model response: {text[:200]!r}")
-    return json.loads(text[start : end + 1])
+    parsed = json.loads(text[start : end + 1])
+
+    # The prompt states the em-dash ban as absolute, and empirically it
+    # mostly holds (0/4 in a live retest after the ban was added, versus
+    # 2-5/answer before it) — but "mostly" isn't the same as "absolute,"
+    # and Matt named this specific tell directly. A deterministic rescue
+    # costs nothing and makes the rule actually unbreakable rather than
+    # just usually-followed: any stray em-dash becomes a comma, which
+    # reads fine in the parenthetical/list contexts the model uses it for.
+    if "—" in (parsed.get("answer") or ""):
+        parsed["answer"] = parsed["answer"].replace(" — ", ", ").replace("—", ", ")
+    return parsed

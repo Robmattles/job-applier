@@ -19,6 +19,7 @@ from aws_cdk import (
     aws_events_targets as targets,
     aws_iam as iam,
     aws_lambda as lambda_,
+    aws_s3 as s3,
 )
 from constructs import Construct
 
@@ -32,6 +33,7 @@ class OpsStack(Stack):
         construct_id: str,
         postings_table: dynamodb.ITableV2,
         applications_table: dynamodb.ITableV2,
+        documents_bucket: s3.IBucket,
         monthly_budget_usd: float = 50.0,
         **kwargs,
     ) -> None:
@@ -66,12 +68,17 @@ class OpsStack(Stack):
                 "APPROVAL_TO_EMAIL": APPROVAL_EMAIL,
                 "APPROVAL_FROM_EMAIL": APPROVAL_EMAIL,
                 "STALE_MINUTES": "30",
+                # §5 kill switch only (config/ramp.json). The sweeper's
+                # whole job is pushing stalled rows onward, which is
+                # exactly what a pause has to stop.
+                "DOCUMENTS_BUCKET": documents_bucket.bucket_name,
             },
             timeout=Duration.minutes(5),
             memory_size=256,
         )
         applications_table.grant_read_write_data(self.sweeper_fn)
         postings_table.grant_read_data(self.sweeper_fn)
+        documents_bucket.grant_read(self.sweeper_fn, "config/*")
         self.sweeper_fn.add_to_role_policy(ses_send)
 
         events.Rule(

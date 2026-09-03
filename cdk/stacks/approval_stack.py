@@ -135,6 +135,11 @@ class ApprovalStack(Stack):
                 "SUBMISSION_QUEUE_URL": submission_queue.queue_url,
                 "GMAIL_ADDRESS": APPROVAL_EMAIL,
                 "GMAIL_SECRET_ID": GMAIL_SECRET_NAME,
+                # §5 kill switch only (config/ramp.json). This Lambda is
+                # the gate in front of the submission queue — a pause has
+                # to stop approvals landing on it, not just stop the
+                # worker draining it.
+                "DOCUMENTS_BUCKET": documents_bucket.bucket_name,
             },
             timeout=Duration.minutes(2),
             memory_size=256,
@@ -143,6 +148,7 @@ class ApprovalStack(Stack):
         pending_approvals_table.grant_read_write_data(self.reply_listener_fn)
         submission_queue.grant_send_messages(self.reply_listener_fn)
         gmail_secret.grant_read(self.reply_listener_fn)
+        documents_bucket.grant_read(self.reply_listener_fn, "config/*")
 
         # 10 minutes: responsive enough that replying "ok" feels immediate,
         # infrequent enough to be nothing against Gmail's IMAP limits.

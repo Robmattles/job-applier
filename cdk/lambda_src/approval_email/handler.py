@@ -218,6 +218,9 @@ def _process_one(application_id: str, app: dict) -> str:
 
 
 def handler(event, context):
+    if inventory_store.halt_if_paused("approval email"):
+        return {"halted": "kill_switch"}
+
     stats = {"sent": 0, "skipped_not_qualified": 0, "skipped_weekly_cap": 0}
     for record in event.get("Records", []):
         image = record.get("dynamodb", {}).get("NewImage")

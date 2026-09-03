@@ -45,8 +45,10 @@ import re
 import time
 
 import boto3
+
 from boto3.dynamodb.conditions import Attr
 
+from job_applier_common import inventory_store
 from job_applier_common.dynamo_utils import scan_all
 
 IMAP_HOST = os.environ.get("IMAP_HOST", "imap.gmail.com")
@@ -276,6 +278,9 @@ def _replies_by_token(imap, days: int = 14) -> dict:
 
 
 def handler(event, context):
+    if inventory_store.halt_if_paused("reply listener"):
+        return {"halted": "kill_switch"}
+
     stats = {"approved": 0, "rejected": 0, "ambiguous": 0, "awaiting": 0}
 
     pending = _pending_rows()

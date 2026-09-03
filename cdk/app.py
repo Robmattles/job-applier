@@ -29,6 +29,7 @@ ingestion = IngestionStack(
     env=env,
     postings_table=foundation.postings_table,
     known_companies_table=foundation.known_companies_table,
+    documents_bucket=foundation.documents_bucket,
     description="job-applier: ingestion Lambdas — direct ATS polling + secondary boards + discovery (ARCHITECTURE.md §6 phase 2)",
 )
 ingestion.add_dependency(foundation)
@@ -98,6 +99,7 @@ ops = OpsStack(
     env=env,
     postings_table=foundation.postings_table,
     applications_table=foundation.applications_table,
+    documents_bucket=foundation.documents_bucket,
     description="job-applier: sweeper + weekly digest + billing alarm (ARCHITECTURE.md §6 phases 8-9)",
 )
 ops.add_dependency(foundation)

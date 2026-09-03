@@ -6,6 +6,7 @@ name-probing discovery (§3): every company name surfaced by these
 sources is a candidate for a direct Greenhouse/Lever/Ashby board too.
 """
 from job_applier_common import ats_clients, companies_store, filters, postings_store
+from job_applier_common import inventory_store
 
 HIMALAYAS_QUERIES = [
     "data scientist",
@@ -51,6 +52,9 @@ def _process(job: dict, source: str, stats: dict) -> None:
 
 
 def handler(event, context):
+    if inventory_store.halt_if_paused("ingestion (secondary boards + discovery)"):
+        return {"halted": "kill_switch"}
+
     stats = {
         "jobs_seen": 0,
         "title_matched": 0,

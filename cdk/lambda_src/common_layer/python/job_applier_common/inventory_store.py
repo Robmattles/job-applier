@@ -60,6 +60,52 @@ def load_weekly_cap(default: int) -> int:
         return default
 
 
+def is_paused() -> bool:
+    """The §5 kill switch: `"paused": true` in `config/ramp.json` halts
+    ingestion and everything outbound, instantly and with no deploy.
+
+    Deliberately NOT cached, unlike load_weekly_cap's `_ramp_cache`. A
+    warm container holding a stale `paused: false` for its whole lifetime
+    would defeat the entire point — the one moment this flag matters is
+    the moment you flip it, and "instantly" in §5 is the requirement, not
+    a nice-to-have. One extra S3 GET per invocation against a 300-byte
+    object is not a cost worth optimizing here.
+
+    Fails OPEN (returns False) if the object is unreadable, matching
+    load_weekly_cap's fallback: a transient S3 error is not a stop
+    signal, and a pipeline that halts itself on a blip would be its own
+    outage. The tradeoff is explicit — this halts a *running* system on
+    request, it is not a safety interlock.
+
+    What it does NOT stop, by design: generation, QA, and render. Those
+    are stream/SQS-triggered, so returning early consumes the trigger and
+    silently loses the work, and none of them send anything to an
+    employer or ingest anything new — they draft. §5 asks for ingestion
+    and submission to halt; drafting in flight finishing harmlessly is
+    the correct behavior, and the sweeper picks up anything the pause
+    stranded once it's lifted."""
+    try:
+        s3 = boto3.client("s3")
+        obj = s3.get_object(
+            Bucket=os.environ["DOCUMENTS_BUCKET"],
+            Key=os.environ.get("RAMP_CONFIG_KEY", "config/ramp.json"),
+        )
+        config = json.loads(obj["Body"].read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"kill switch unreadable ({e}); continuing unpaused")
+        return False
+    return bool(config.get("paused", False))
+
+
+def halt_if_paused(what: str) -> bool:
+    """`if inventory_store.halt_if_paused("ingestion"): return {...}` —
+    the one line every haltable Lambda opens with."""
+    if is_paused():
+        print(f"KILL SWITCH ON (config/ramp.json paused=true) — {what} halted, no work done")
+        return True
+    return False
+
+
 def compact_records(inventory: dict, lane: str = None, include_role: bool = False) -> list:
     """Strip inventory records to what a prompt needs, dropping `source`
     (the grounding-QA pass's traceability field, not needed by any
