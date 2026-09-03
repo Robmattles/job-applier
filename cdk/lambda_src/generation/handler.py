@@ -233,6 +233,15 @@ def _process_one(posting_id: str) -> str:
             "company_name": posting.get("company_name", posting.get("company_slug", "")),
             "title": posting.get("title", ""),
             "url": posting.get("url", ""),
+            # The submittability gate (§5) already resolved this at
+            # QUALIFIED-promotion time — for an aggregator-sourced
+            # posting it's the real employer ATS form, not the listing
+            # article `url` above. Confirmed live 2026-09-03: it was
+            # computed and stored on the posting but never carried
+            # forward here, so the worker never saw it and fell back to
+            # opening the raw listing even on postings the gate had
+            # already matched to a fillable form.
+            "apply_url": posting.get("apply_url", ""),
             "lane": lane,
             "fit_score": posting.get("fit_score"),
             "generated_content": content,

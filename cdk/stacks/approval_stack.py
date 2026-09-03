@@ -150,13 +150,20 @@ class ApprovalStack(Stack):
         gmail_secret.grant_read(self.reply_listener_fn)
         documents_bucket.grant_read(self.reply_listener_fn, "config/*")
 
-        # 10 minutes: responsive enough that replying "ok" feels immediate,
-        # infrequent enough to be nothing against Gmail's IMAP limits.
+        # A backstop, not the fast path — see submission_worker/watcher.py,
+        # which now polls Gmail locally every ~15s and is always faster
+        # while it's running (Matt's ask: "worst case latency... needs to
+        # be max 30 seconds," which no EventBridge schedule reaches on
+        # its own; 1 minute is the platform floor for a rate expression).
+        # This exists for when the watcher isn't — laptop closed, crashed,
+        # not yet installed — so a reply is never stuck for longer than 5
+        # minutes even in that case. Both write through the same
+        # idempotent classify_reply gate, so running both is never unsafe.
         events.Rule(
             self,
             "ReplyListenerSchedule",
             rule_name="job-applier-reply-listener-schedule",
-            schedule=events.Schedule.rate(Duration.minutes(10)),
+            schedule=events.Schedule.rate(Duration.minutes(5)),
             targets=[targets.LambdaFunction(self.reply_listener_fn)],
         )
 

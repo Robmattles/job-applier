@@ -61,8 +61,28 @@ RAMP_CONFIG_KEY = "config/ramp.json"
 # top of one Matt is already typing into.
 RUN_LOCK = os.path.expanduser("~/.job-applier-worker.lock")
 
-# Sources whose stored URL is a listing page, not an application form.
+# Sources whose stored URL is *usually* a listing page, not an
+# application form — used only for logging/messaging now, not for
+# deciding whether to fill. See _is_fillable_url below for why.
 AGGREGATOR_SOURCES = {"himalayas", "remoteok", "jobicy"}
+
+# Domains where fill_form's field-matching actually applies. Confirmed
+# live 2026-09-03: the real decision has to be "what is this URL," not
+# "what source did this posting come from." submittability.py (ARCHITECTURE.md
+# §5) resolves an aggregator-sourced posting to a real employer ATS form
+# whenever it can find one, and generation now carries that resolved
+# `apply_url` through — but this file was still deciding "should I fill
+# this" from the application_id's source prefix alone, so a posting the
+# gate had already matched to a genuine, fillable jobs.ashbyhq.com URL
+# still got treated as "just open the listing," because "jobicy" was the
+# origin label. A posting whose source is `jobicy` but whose resolved URL
+# is a real Ashby form is exactly as fillable as one that started life on
+# Ashby; the origin stopped mattering the moment the gate resolved it.
+_FILLABLE_DOMAINS = ("jobs.ashbyhq.com", "job-boards.greenhouse.io", "jobs.lever.co")
+
+
+def _is_fillable_url(url: str) -> bool:
+    return any(d in (url or "") for d in _FILLABLE_DOMAINS)
 
 
 def _session():
@@ -91,20 +111,50 @@ def is_paused(session=None) -> bool:
 
 
 def _take_run_lock():
-    """Best-effort, single-machine. Stale locks (a crashed worker) are
-    reclaimed by checking whether the recorded pid is still alive."""
+    """Single-machine, atomic. Stale locks (a crashed worker) are
+    reclaimed by checking whether the recorded pid is still alive.
+
+    Confirmed live 2026-09-03: the watcher can legitimately start two
+    workers within moments of each other (a restart racing its own
+    previous tick, or two ticks both catching the same already-APPROVED
+    row before the first worker has visibly claimed it). The original
+    version here read the file, checked the pid, and only then wrote —
+    three steps with no atomicity between them, so two processes
+    starting close together could both pass the check and both write,
+    with whichever wrote last "owning" the file. When that one later
+    turned out to be the process that found no work and exited (the
+    other having already taken the SQS message), its exit-time release
+    deleted the lock out from under the *other* process, which was still
+    actively running — leaving the watcher's next tick with no lock file
+    to see and free to launch a third one.
+
+    O_CREAT|O_EXCL makes the create itself the atomic operation: at most
+    one process can win it, full stop, no window between a check and a
+    write for a second process to land in."""
     try:
-        existing = int(open(RUN_LOCK).read().strip())
-        os.kill(existing, 0)
-    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
-        pass
+        fd = os.open(RUN_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            existing = int(open(RUN_LOCK).read().strip())
+            os.kill(existing, 0)
+        except (ValueError, ProcessLookupError, PermissionError):
+            # Stale — the recorded pid isn't running. Best-effort reclaim:
+            # if this loses a genuine race against another fresh starter,
+            # that starter's own O_EXCL create below still can't be
+            # fooled, so at most one of us proceeds.
+            try:
+                os.unlink(RUN_LOCK)
+            except FileNotFoundError:
+                pass
+            return _take_run_lock()
+        else:
+            print(f"another worker is already running (pid {existing})")
+            return False
     else:
-        print(f"another worker is already running (pid {existing})")
-        return False
-    with open(RUN_LOCK, "w") as fh:
-        fh.write(str(os.getpid()))
-    atexit.register(_release_run_lock)
-    return True
+        with os.fdopen(fd, "w") as fh:
+            fh.write(str(os.getpid()))
+        atexit.register(_release_run_lock)
+        return True
 
 
 def _release_run_lock():
@@ -519,6 +569,7 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
     application_id = app["application_id"]
     source = application_id.split("#", 1)[0]
     url = _apply_url(app)
+    fillable = _is_fillable_url(url)
 
     print("=" * 70)
     print(f"{app.get('company_name','')} — {app.get('title','')}")
@@ -531,9 +582,12 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
     values = _safe_autofill_values(profile)
     print(f"  documents: {', '.join(documents) or 'none'} (in {workdir})")
 
-    if source in AGGREGATOR_SOURCES:
-        print(f"\n  NOTE: {source} is an aggregator listing, not an application form.")
+    if not fillable:
+        why = f"{source} is an aggregator listing" if source in AGGREGATOR_SOURCES else "no resolved application form"
+        print(f"\n  NOTE: {why}, not a fillable form.")
         print("  Opening it for you to navigate to the employer's real form yourself.")
+    elif source in AGGREGATOR_SOURCES:
+        print(f"\n  NOTE: {source}-sourced, but resolved to a real form on {url.split('/')[2]} — filling it normally.")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -542,7 +596,7 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
 
         report = {"filled": [], "skipped_sensitive": [], "unmapped": [], "uploads": [],
               "skipped_autofill": [], "_open_questions": []}
-        if source not in AGGREGATOR_SOURCES:
+        if fillable:
             # The Greenhouse embed iframe finishes loading well after the
             # host page does; scanning too early finds an empty form.
             page.wait_for_timeout(3000)
@@ -575,7 +629,7 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
         if dry_run:
             print("  (dry run — nothing filled, nothing submitted)")
             answer = "s"
-        elif source in AGGREGATOR_SOURCES:
+        elif not fillable:
             print("  No employer form here — the listing is all this source exposes.")
             answer = input("\n  Did you submit it yourself? [y]es / [n]o / [s]kip: ").strip().lower()
         elif not auto:

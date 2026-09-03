@@ -9,6 +9,13 @@
 # A LaunchAgent (not a LaunchDaemon): it runs as Matt, in his GUI session,
 # which is the whole point — it has to be able to open a Terminal window
 # and a Chrome window on his actual screen.
+#
+# python -u: launchd redirects stdout/stderr to a file, and Python fully
+# block-buffers stdout when it isn't a tty — confirmed live 2026-09-03,
+# the log sat completely empty through several real ticks (Gmail checks,
+# a worker launch) because nothing had filled the buffer yet. -u makes
+# every print land in the log immediately, which is the only way "tail
+# -f the log" is actually useful for seeing what the watcher just did.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LABEL=com.mattbarr.job-applier-watcher
@@ -40,6 +47,7 @@ cat > "$PLIST" <<PLIST_EOF
   <key>ProgramArguments</key>
   <array>
     <string>$HERE/.venv/bin/python</string>
+    <string>-u</string>
     <string>$HERE/watcher.py</string>
   </array>
   <key>EnvironmentVariables</key>
