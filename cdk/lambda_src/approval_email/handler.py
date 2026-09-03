@@ -84,10 +84,21 @@ def _get_ses():
 
 def _emails_sent_since(epoch: int) -> int:
     """Approval emails actually sent in the window, from the
-    pending-approvals table — counted regardless of how each was later
-    decided, since an email Matt rejected still cost him the review."""
+    pending-approvals table — counted regardless of how Matt decided
+    each one, since an email he rejected still cost him the review.
+
+    WITHDRAWN rows are the exception, and the distinction is the point:
+    those were pulled by the *system*, not decided by him — an
+    application the submittability gate later found unfillable, say.
+    Confirmed live 2026-09-03: 6 of the 25 slots against a cap of 25
+    were withdrawn-as-unfillable, several of which Gmail had spam-
+    filtered so he never even saw them (see HANDOFF.md §7). Counting
+    those spends a budget that exists to bound *how much review lands on
+    him* against work that never reached him at all. Everything he
+    actually saw and could act on still counts, including ones he said
+    no to."""
     rows = scan_all(_pending(), FilterExpression=Attr("sent_at").gte(epoch))
-    return len(rows)
+    return len([r for r in rows if r.get("status") != "WITHDRAWN"])
 
 
 def _deserialize(image: dict) -> dict:
