@@ -524,9 +524,35 @@ def fill_form(page, values: dict, documents: dict, dry_run: bool = False) -> dic
                 # Resume/cover-letter uploads are the one place a wrong
                 # guess is harmless — worst case Matt re-attaches.
                 target = "cover_letter" if "cover" in d else "resume"
-                if target in documents and not dry_run:
+                if target not in documents:
+                    report["uploads"].append(f"{descriptor.strip()[:60]} <- (no {target} to attach)")
+                    continue
+                if dry_run:
+                    report["uploads"].append(f"{descriptor.strip()[:60]} <- {target} (dry run)")
+                    continue
+                # Report what actually attached, not what was attempted.
+                # Confirmed 2026-09-03: this line used to append
+                # "<name> <- resume" unconditionally — before the file was
+                # set, whether or not `documents` even had that file, and
+                # in dry runs where nothing is set at all. It was a
+                # statement of intent formatted as a result, which is
+                # exactly how a pre-flight check of this form came back
+                # "uploads=2" and got reported to Matt as "both résumé and
+                # cover letter attaching" when the check had been run with
+                # an empty documents dict and could not have attached
+                # anything. Reading back el.files is the actual signal.
+                try:
                     handle.set_input_files(documents[target])
-                report["uploads"].append(f"{descriptor.strip()[:60]} <- {target}")
+                    attached = handle.evaluate("el => el.files ? el.files.length : 0")
+                except Exception as e:  # noqa: BLE001
+                    report["uploads"].append(f"{descriptor.strip()[:60]} <- {target} FAILED: {e}")
+                    continue
+                if attached:
+                    report["uploads"].append(f"{descriptor.strip()[:60]} <- {target}")
+                else:
+                    report["uploads"].append(
+                        f"{descriptor.strip()[:60]} <- {target} DID NOT ATTACH — attach it yourself"
+                    )
                 continue
 
             key = _match_field(descriptor)
