@@ -1,26 +1,33 @@
 """job-applier-sweeper — ARCHITECTURE.md §6 phase 9 (guardrails).
 
-Two jobs, both closing gaps found by running the pipeline for real:
+UNSTICK. Every stage after generation is DynamoDB-Streams-triggered with
+`starting_position=LATEST`, which means a row that reached a trigger
+state *before* that stage existed — or during any window where it was
+broken, redeploying, or throttled — is never seen by anything again. It
+just sits. This happened three separate times during buildout (QA,
+render, and approval each missed a batch) and each was fixed by hand.
+Nothing retries on its own, so a stalled application is silent and
+permanent. The fix is deliberately dumb: re-write the row's own status
+back onto itself, which emits a fresh stream event that the downstream
+filter matches. No new plumbing, and it works for whichever stage
+happens to be the stalled one.
 
-1. UNSTICK. Every stage after generation is DynamoDB-Streams-triggered
-   with `starting_position=LATEST`, which means a row that reached a
-   trigger state *before* that stage existed — or during any window
-   where it was broken, redeploying, or throttled — is never seen by
-   anything again. It just sits. This happened three separate times
-   during buildout (QA, render, and approval each missed a batch) and
-   each was fixed by hand. Nothing retries on its own, so a stalled
-   application is silent and permanent. The fix is deliberately dumb:
-   re-write the row's own status back onto itself, which emits a fresh
-   stream event that the downstream filter matches. No new plumbing, and
-   it works for whichever stage happens to be the stalled one.
-
-2. SURFACE NEEDS_REVIEW. QA parks an application in NEEDS_REVIEW when it
-   finds an evidence gap it won't paper over — correct behavior, but
-   until now those reached Matt through no channel at all and simply
-   aged out. A gap QA can't close is often something only he can answer
-   ("do I actually have 6 years of X?"), so silently dropping an 82-fit
-   posting over one unmet line is a worse failure than asking.
-"""
+A per-application "N applications need your call" email used to live
+here too, one for each NEEDS_REVIEW application QA couldn't clear.
+Removed 2026-09-03, Matt's call: QA's pass B (cdk/lambda_src/qa/handler.py)
+was treating every JD line as an equally hard gate, when most postings
+list far more "requirements" than any real hire actually clears — so
+this email was mostly noise pointing at gaps a real recruiter wouldn't
+screen on, dressed up as "reply and we'll fix it" when nothing actually
+processed a reply. Fixed at the source instead: pass B now separates
+HARD_GATE lines from SOFT/wishlist ones and only escalates to
+NEEDS_REVIEW on a hard gate, so far fewer applications land here at all,
+and the honest caveats about the soft gaps still ride along in a normal
+approval email rather than blocking it. What does still land in
+NEEDS_REVIEW (a real hard gate — e.g. a stated years-of-experience
+threshold, a required clearance) surfaces in the weekly digest's
+aggregate count instead of a dedicated email — visible without a
+notification for every one, individually, going out again."""
 import os
 import time
 
@@ -31,8 +38,6 @@ from boto3.dynamodb.conditions import Attr
 from job_applier_common import inventory_store
 from job_applier_common.dynamo_utils import scan_all
 
-APPROVAL_TO = os.environ["APPROVAL_TO_EMAIL"]
-APPROVAL_FROM = os.environ["APPROVAL_FROM_EMAIL"]
 # Generous: QA legitimately takes minutes per application and processes
 # serially, so anything under this is probably just queued, not stuck.
 STALE_MINUTES = int(os.environ.get("STALE_MINUTES", "30"))
@@ -63,13 +68,6 @@ def _postings():
     if _postings_table_ref is None:
         _postings_table_ref = boto3.resource("dynamodb").Table(os.environ["POSTINGS_TABLE"])
     return _postings_table_ref
-
-
-def _get_ses():
-    global _ses
-    if _ses is None:
-        _ses = boto3.client("ses")
-    return _ses
 
 
 def _still_in_this_weeks_batch(posting_id: str) -> bool:
@@ -116,60 +114,11 @@ def _unstick(stats: dict):
             stats["unstuck"] += 1
 
 
-def _notify_needs_review(stats: dict):
-    table = _table()
-    rows = [
-        r
-        for r in scan_all(table, FilterExpression=Attr("status").eq("NEEDS_REVIEW"))
-        if not r.get("needs_review_notified_at")
-    ]
-    if not rows:
-        return
-
-    lines = [
-        "These applications stopped at QA — it found a gap it wouldn't write around,",
-        "so nothing was sent. Each one needs your call.",
-        "",
-    ]
-    for r in rows:
-        lines.append(f"{r.get('company_name','')} — {r.get('title','')}")
-        lines.append(f"  fit {r.get('fit_score','?')}   {r.get('url','')}")
-        for entry in r.get("qa_audit_trail", []) or []:
-            for reason in (entry.get("reasons_to_reject") or [])[:3]:
-                lines.append(f"  - {reason}")
-            break
-        lines.append("")
-    lines += [
-        "Nothing happens to these automatically. If one is worth pursuing, the gap is",
-        "usually something only you can answer — reply to me and we'll fix the record",
-        "or apply manually.",
-    ]
-
-    _get_ses().send_email(
-        Source=APPROVAL_FROM,
-        Destination={"ToAddresses": [APPROVAL_TO]},
-        Message={
-            "Subject": {"Data": f"{len(rows)} application(s) need your review"},
-            "Body": {"Text": {"Data": "\n".join(lines)}},
-        },
-    )
-
-    now = int(time.time())
-    for r in rows:
-        table.update_item(
-            Key={"application_id": r["application_id"]},
-            UpdateExpression="SET needs_review_notified_at = :ts",
-            ExpressionAttributeValues={":ts": now},
-        )
-    stats["needs_review_notified"] = len(rows)
-
-
 def handler(event, context):
     if inventory_store.halt_if_paused("sweeper"):
         return {"halted": "kill_switch"}
 
-    stats = {"unstuck": 0, "skipped_displaced": 0, "needs_review_notified": 0}
+    stats = {"unstuck": 0, "skipped_displaced": 0}
     _unstick(stats)
-    _notify_needs_review(stats)
     print(f"job-applier-sweeper stats: {stats}")
     return stats

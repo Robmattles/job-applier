@@ -145,31 +145,60 @@ posting. This is a different check from an authenticity/grounding pass — you'r
 if it sounds AI-written or if claims are true, you're checking whether this document actually \
 gets the candidate through to a human, and whether it should.
 
+Real job postings list far more "requirements" than any real candidate is expected to fully \
+clear, and real recruiters and hiring managers know this — a posting is a wishlist padded by \
+whoever wrote it, not a literal pass/fail checklist, and most people who get hired satisfy a \
+majority of it, not all of it. Treating every line as equally load-bearing produces false \
+rejects on postings the candidate would genuinely be competitive for. Your job is to tell the \
+difference between a line that actually gates candidates out and a line that's aspirational \
+padding, not to flag every gap as equally serious.
+
 Do this:
-1. List the JD's REQUIRED lines (not nice-to-haves) individually — don't bundle two requirements
-   into one finding even if they feel adjacent (e.g. "mentoring" and "stakeholder communication"
-   are two separate lines to check, not one). For each, mark covered true/false with a one-line
-   note pointing at what in the document covers it (or doesn't).
+1. List the JD's REQUIRED lines (not lines already phrased as "nice to have" or "bonus")
+   individually — don't bundle two requirements into one finding even if they feel adjacent
+   (e.g. "mentoring" and "stakeholder communication" are two separate lines to check, not one).
+   For each, mark covered true/false with a one-line note, AND classify its weight:
+     - HARD_GATE: something a real ATS or recruiter actually screens out on mechanically —
+       an explicit minimum-years threshold stated as a gate ("10+ years required," "must have
+       X+ years"), a specific mandatory credential/degree/clearance/license, a work-authorization
+       or location requirement, or the role being a fundamentally different discipline than the
+       candidate's background (not an adjacent skill gap — an actual different job).
+     - SOFT: everything else, even when the JD's own wording sounds mandatory. This includes: a
+       specific named tool/framework/technique inside a broader skill category the candidate does
+       show (e.g. missing "PyTorch" by name when the candidate shows other deep ML/production
+       systems work; missing one specific causal-inference technique by name when the candidate
+       shows other causal-inference/experimentation work); a secondary technology listed alongside
+       a primary stack the candidate does have (Kubernetes named next to Docker, Kafka named next
+       to Spark); a long laundry list of specific named sub-techniques where competence in the
+       parent discipline is a reasonable signal; subjective culture/pace language ("fast-paced,"
+       "startup mindset"); anything phrased as one of several bullet-listed "qualifications" rather
+       than a single explicit gating line.
+   When genuinely unsure whether a line is a hard gate, classify it SOFT — the cost of a false
+   HARD_GATE is a competitive candidate never getting seen; the cost of a false SOFT is just an
+   honest caveat in the reasons-to-reject that a human reads before deciding whether to apply.
 2. The 5 strongest reasons to interview, each grounded in something actually on the page.
 3. The 3 most likely reasons to reject, each naming the specific JD line it fails — every finding
    here must trace to a specific line in the posting, not a generic resume-best-practices note.
+   Include SOFT gaps here too if they're real and worth a human knowing before they apply — this
+   list is for honest context, not just blocking findings.
 4. Basic ATS-parseability notes (consistent date formats, no obviously unparseable structure) —
    informational only, the fixed template is expected to already guarantee this.
 
-Then decide:
-- PASS: no required-line gaps that would sink this application.
-- FIXABLE_GAP: a required line isn't covered, but the candidate's inventory likely has evidence
-  for it that generation didn't select — give a specific instruction for what to re-select or
-  rewrite (name the record/skill/angle, not "improve the resume").
-- NEEDS_REVIEW: a required line has a genuine evidence gap — not fixable by rewriting, a human
-  needs to see this before it goes out.
+Then decide, based on HARD_GATE lines only — a SOFT gap, however long the list, never changes
+this verdict away from PASS on its own:
+- PASS: no uncovered HARD_GATE line.
+- FIXABLE_GAP: an uncovered HARD_GATE line, but the candidate's inventory likely has evidence for
+  it that generation didn't select — give a specific instruction for what to re-select or rewrite
+  (name the record/skill/angle, not "improve the resume").
+- NEEDS_REVIEW: an uncovered HARD_GATE line with a genuine evidence gap — not fixable by
+  rewriting, a human needs to see this before it goes out.
 
 Respond with ONLY a JSON object, no markdown fences, no other text:
 {
   "verdict": "PASS" or "FIXABLE_GAP" or "NEEDS_REVIEW",
-  "required_line_coverage": [{"jd_line": "<text>", "covered": true, "note": "<...>"}],
+  "required_line_coverage": [{"jd_line": "<text>", "covered": true, "weight": "HARD_GATE" or "SOFT", "note": "<...>"}],
   "reasons_to_interview": ["<...>"],
-  "reasons_to_reject": ["<names a specific JD line>"],
+  "reasons_to_reject": ["<names a specific JD line, SOFT gaps included>"],
   "ats_parseability_notes": ["<...>"],
   "fix_instructions": "<specific, only if FIXABLE_GAP>",
   "unfixable_reason": "<specific, only if NEEDS_REVIEW>"
@@ -186,7 +215,32 @@ Description:
 
 CANDIDATE DOCUMENT:
 {json.dumps(content, indent=2)}"""
-    return bedrock_client.invoke_json(MODEL_ID, PASS_B_SYSTEM_PROMPT, user_prompt, max_tokens=3000)
+    result = bedrock_client.invoke_json(MODEL_ID, PASS_B_SYSTEM_PROMPT, user_prompt, max_tokens=3000)
+
+    # The prompt states the decision rule as "PASS only if no uncovered
+    # HARD_GATE line" — confirmed live 2026-09-03 that the model doesn't
+    # always follow its own stated rule: a SQUAD posting requiring
+    # Ukraine-only remote work got listed as an uncovered HARD_GATE line
+    # and still came back verdict=PASS. A model being internally
+    # inconsistent about its own output is exactly the class of thing
+    # this codebase never trusts on the LLM's word alone (the em-dash
+    # ban in submission_worker/answers.py has the same deterministic
+    # backstop, for the same reason). NEEDS_REVIEW rather than
+    # FIXABLE_GAP: an uncovered hard gate here is a plain fact mismatch
+    # (location, years, credential), not something a resume rewrite can
+    # close, so looping it through generation again would just burn a
+    # revision cycle rewriting content that was never the problem.
+    uncovered_hard_gates = [
+        c.get("jd_line", "") for c in result.get("required_line_coverage", [])
+        if c.get("weight") == "HARD_GATE" and not c.get("covered")
+    ]
+    if uncovered_hard_gates and result.get("verdict") == "PASS":
+        result["verdict"] = "NEEDS_REVIEW"
+        result["unfixable_reason"] = (
+            "Overridden from the model's own PASS: uncovered HARD_GATE line(s) present — "
+            + "; ".join(uncovered_hard_gates)
+        )
+    return result
 
 
 # --------------------------------------------------------------------------

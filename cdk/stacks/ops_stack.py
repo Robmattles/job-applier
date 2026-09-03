@@ -65,8 +65,6 @@ class OpsStack(Stack):
             environment={
                 "APPLICATIONS_TABLE": applications_table.table_name,
                 "POSTINGS_TABLE": postings_table.table_name,
-                "APPROVAL_TO_EMAIL": APPROVAL_EMAIL,
-                "APPROVAL_FROM_EMAIL": APPROVAL_EMAIL,
                 "STALE_MINUTES": "30",
                 # §5 kill switch only (config/ramp.json). The sweeper's
                 # whole job is pushing stalled rows onward, which is
@@ -79,7 +77,10 @@ class OpsStack(Stack):
         applications_table.grant_read_write_data(self.sweeper_fn)
         postings_table.grant_read_data(self.sweeper_fn)
         documents_bucket.grant_read(self.sweeper_fn, "config/*")
-        self.sweeper_fn.add_to_role_policy(ses_send)
+        # No ses_send grant — the sweeper no longer sends its own
+        # per-application NEEDS_REVIEW email (removed 2026-09-03, see
+        # sweeper/handler.py's module docstring). It still unsticks
+        # stalled rows; it just doesn't email about them anymore.
 
         events.Rule(
             self,
