@@ -73,10 +73,17 @@ class ScoringStack(Stack):
                 "WEEKLY_CAP": "10",
                 "FIT_SCORE_THRESHOLD": "60",
                 # Points/day subtracted from fit_score for the weekly-cap
-                # ranking (§5). Raised 2026-09-02 from an initial 0.5 —
-                # Matt's call, after seeing real scores cluster in a
-                # ~70-82 band that doesn't differentiate much on its own.
-                "AGE_PENALTY_PER_DAY": "3",
+                # ranking (§5). 0.5 -> 3 on 2026-09-02, once real scores
+                # turned out to cluster in a ~70-82 band that barely
+                # differentiates on fit alone. 3 -> 6 on 2026-09-03, Matt:
+                # "I want a regular feed of new listings most relevant to
+                # me." The entire 739-posting corpus was ingested across two
+                # days during the build, and measured against it, 3 pts/day
+                # meant a genuinely new listing took 3-5 days to outrank the
+                # pile; 6 makes it 1-2. It also permanently favors recency in
+                # steady state — a 10-point-better older posting now has to
+                # be under ~2 days old to still win.
+                "AGE_PENALTY_PER_DAY": "6",
                 # Raised 2026-09-02 from 25 to clear a one-time 609-posting
                 # backlog (repeated dev-time ingestion runs, not real steady
                 # -state volume) that was starving mid-level postings of a
