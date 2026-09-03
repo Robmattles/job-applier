@@ -42,6 +42,7 @@ import argparse
 import atexit
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -645,6 +646,70 @@ def _submit_blockers(page, documents: dict) -> list:
     return blockers
 
 
+# Signals that an application actually went through. Deliberately
+# specific: a false positive here records a submission that never
+# happened, which is worse than asking — Matt would believe a role was
+# applied to and never follow up. "thanks" or "success" alone are too
+# loose (they appear in cookie banners and marketing copy), so these
+# require wording that only appears after a real submit.
+_CONFIRMED_URL_RE = re.compile(r"(thank[-_]?you|confirmation|application[-_]?(sent|received|complete))", re.I)
+_CONFIRMED_TEXT_RE = re.compile(
+    # "thank you for your interest" is deliberately absent: it's ordinary
+    # careers-page copy ("Thank you for your interest in Thumbtack
+    # careers" matched it in testing), and a false positive here records
+    # a submission that never happened. Real confirmations essentially
+    # always also say "application" or "applying", which the remaining
+    # alternatives catch.
+    r"(thank you for (applying|your application)"
+    r"|your application (has been )?(been )?(submitted|received|sent)"
+    r"|we(?:'ve| have) received your application"
+    r"|application (submitted|received) successfully"
+    r"|thanks for applying)",
+    re.I,
+)
+
+
+def _watch_for_submission(page, poll_seconds: float = 2.0, timeout_seconds: int = 1800) -> str:
+    """Watches the open page until the application is visibly submitted,
+    the browser is closed, or we give up. Returns "submitted", "closed",
+    or "timeout".
+
+    This exists to delete the last step that made Matt go somewhere he
+    wasn't already: after filling the form, the worker used to stop and
+    ask "Did you submit it? [y]es/[n]o/[s]kip" in a Terminal window,
+    meaning he had to submit in the browser and then go back to a
+    terminal to tell us what he'd just done. He never reliably did —
+    Socure and Fivetran both sat unanswered for an hour, staying
+    APPROVED, which then got them relaunched later (and, for Socure,
+    recorded by hand after the fact).
+
+    The page itself already knows the answer, so ask the page. Nothing
+    is recorded as submitted without a real confirmation signal — see
+    the regexes above, and note that a closed browser deliberately does
+    NOT count as success."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if page.is_closed():
+            return "closed"
+        try:
+            url = page.url or ""
+            if _CONFIRMED_URL_RE.search(url):
+                return "submitted"
+            for frame in page.frames:
+                try:
+                    if _CONFIRMED_TEXT_RE.search(frame.inner_text("body") or ""):
+                        return "submitted"
+                except Exception:  # noqa: BLE001 — frame mid-navigation
+                    continue
+        except Exception:  # noqa: BLE001 — page closed mid-check
+            return "closed"
+        try:
+            page.wait_for_timeout(int(poll_seconds * 1000))
+        except Exception:  # noqa: BLE001
+            return "closed"
+    return "timeout"
+
+
 def _click_submit(page) -> bool:
     for sel in (
         "button[type=submit]",
@@ -748,7 +813,8 @@ def _offer_drafts(session, open_questions: list, app: dict, profile: dict):
         print("     filled — edit directly in the browser if this needs a change.")
 
 
-def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> str:
+def process_application(app: dict, dry_run: bool = False, auto: bool = True,
+                        prompt: bool = False) -> str:
     from playwright.sync_api import sync_playwright
 
     session = _session()
@@ -829,29 +895,57 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
             _offer_drafts(session, report["_open_questions"], app, profile)
 
         print("\n" + "-" * 70)
+
+        def _hand_over(reason: str) -> str:
+            """Hand the browser to Matt and watch the page instead of
+            asking him. See _watch_for_submission — the terminal question
+            this replaces was the last step that made him go somewhere he
+            wasn't already, and the one he most often didn't do."""
+            print(f"  {reason}")
+            if prompt:
+                return input("\n  Did you submit it? [y]es / [n]o / [s]kip: ").strip().lower()
+            print("  Watching this page — submit in the browser and I'll record it myself.")
+            print("  (close the window if you're not applying; ctrl-C here to stop watching)")
+            outcome = _watch_for_submission(page)
+            if outcome == "submitted":
+                print("  detected a submission confirmation on the page")
+                return "y"
+            if outcome == "closed":
+                # Deliberately not "n": he may well have submitted and
+                # then closed the tab, and there's no way to tell from
+                # here. Recording either way would be a guess — one that
+                # risks re-queueing an application he already sent.
+                print("  browser closed without a visible confirmation — recording as unconfirmed")
+                return "u"
+            print("  stopped watching (30 min) — leaving it approved to come back to")
+            return "s"
+
         if dry_run:
             print("  (dry run — nothing filled, nothing submitted)")
             answer = "s"
         elif not fillable:
-            print("  No employer form here — the listing is all this source exposes.")
-            answer = input("\n  Did you submit it yourself? [y]es / [n]o / [s]kip: ").strip().lower()
+            answer = _hand_over("No employer form here — the listing is all this source exposes.")
         elif not auto:
-            print("  --review: filled but not submitted. Over to you.")
-            answer = input("\n  Did you submit it? [y]es / [n]o / [s]kip: ").strip().lower()
+            answer = _hand_over("--review: filled but not submitted. Over to you.")
         else:
             blockers = _submit_blockers(page, documents)
             if blockers:
-                print("  NOT submitting — these need you:")
-                for bl in blockers:
-                    print(f"    - {bl}")
-                answer = input("\n  Did you submit it? [y]es / [n]o / [s]kip: ").strip().lower()
+                answer = _hand_over(
+                    "NOT submitting — these need you: " + "; ".join(blockers)
+                )
             elif _click_submit(page):
-                print(f"  SUBMITTED -> {page.url[:88]}")
-                answer = "y"
+                # Even the auto path verifies rather than assumes: a
+                # click that lands on a validation error is not a
+                # submission, and used to be recorded as one.
+                if _watch_for_submission(page, timeout_seconds=45) == "submitted":
+                    print(f"  SUBMITTED -> {page.url[:88]}")
+                    answer = "y"
+                else:
+                    answer = _hand_over("clicked submit but saw no confirmation — check it")
             else:
-                print("  no submit button found — over to you.")
-                answer = input("\n  Did you submit it? [y]es / [n]o / [s]kip: ").strip().lower()
-        browser.close()
+                answer = _hand_over("no submit button found — over to you.")
+        if not page.is_closed():
+            browser.close()
 
     now = int(time.time())
     if answer.startswith("y"):
@@ -871,6 +965,20 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
             ExpressionAttributeValues={":s": "NOT_SUBMITTED", ":ts": now},
         )
         print("  recorded as NOT_SUBMITTED\n")
+        return "not_submitted"
+    if answer.startswith("u"):
+        # Browser closed with no confirmation seen. Terminal on purpose:
+        # it must not come back round for another attempt, because if he
+        # did submit, a relaunch invites submitting the same application
+        # to the same employer twice. Surfaced in the Monday digest
+        # instead, where he can correct it if it's wrong.
+        applications.update_item(
+            Key={"application_id": application_id},
+            UpdateExpression="SET #s = :s, closed_at = :ts, submitted_via = :v",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "SUBMITTED_UNCONFIRMED", ":ts": now, ":v": url},
+        )
+        print("  recorded as SUBMITTED_UNCONFIRMED — will not be retried\n")
         return "not_submitted"
     print("  left APPROVED — deferred an hour, then it comes back\n")
     return "skipped"
@@ -943,6 +1051,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="open and inspect, fill nothing")
     parser.add_argument("--review", action="store_true",
                         help="fill but never submit — you review and click submit yourself")
+    parser.add_argument("--prompt", action="store_true",
+                        help="ask 'did you submit it?' in the terminal instead of watching the page")
     args = parser.parse_args()
 
     if not _take_run_lock():
@@ -985,7 +1095,8 @@ def main() -> int:
             continue
 
         try:
-            outcome = process_application(app, dry_run=args.dry_run, auto=not args.review)
+            outcome = process_application(app, dry_run=args.dry_run, auto=not args.review,
+                                      prompt=args.prompt)
         except Exception as e:  # noqa: BLE001
             # A crash IS the case redelivery is for, so this one goes back
             # on the queue rather than being deferred — released
