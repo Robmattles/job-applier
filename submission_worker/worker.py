@@ -411,22 +411,39 @@ def _reveal_form(page, timeout_ms: int = 15000) -> dict:
         page.wait_for_timeout(250)
 
     for text in _REVEAL_CANDIDATE_TEXTS:
-        try:
-            el = page.query_selector(f"text={text}")
-        except Exception:  # noqa: BLE001
-            continue
-        if not el or not el.is_visible():
-            continue
-        try:
-            el.click()
-        except Exception:  # noqa: BLE001 — try the next candidate
-            continue
-        click_deadline = time.time() + 5
-        while time.time() < click_deadline:
-            count = _field_count(page)
-            if count >= _MIN_FIELDS_FOR_LOADED:
-                return {"revealed": True, "field_count": count, "clicked": text}
-            page.wait_for_timeout(250)
+        # Confirmed useful to check for live 2026-09-03: the reveal
+        # trigger isn't always text a Playwright `text=` selector can see
+        # — some employer sites render it as a plain image (an icon or a
+        # graphic "Apply" button) with nothing but an aria-label or an
+        # <img alt="..."> to say what it is. A candidate word that only
+        # ever tries a text match would silently do nothing on a page
+        # like that, the same failure shape as the original
+        # "Application"-only bug, just one layer further down. Each
+        # candidate now tries its plain text form, then the same word as
+        # an aria-label on the clickable element itself, then as alt text
+        # on an image inside it — three ways to say "Apply" can name
+        # itself, not just one.
+        for sel in (
+            f"text={text}",
+            f"[aria-label*='{text}' i]",
+            f"a:has(img[alt*='{text}' i]), button:has(img[alt*='{text}' i])",
+        ):
+            try:
+                el = page.query_selector(sel)
+            except Exception:  # noqa: BLE001
+                continue
+            if not el or not el.is_visible():
+                continue
+            try:
+                el.click()
+            except Exception:  # noqa: BLE001 — try the next candidate
+                continue
+            click_deadline = time.time() + 5
+            while time.time() < click_deadline:
+                count = _field_count(page)
+                if count >= _MIN_FIELDS_FOR_LOADED:
+                    return {"revealed": True, "field_count": count, "clicked": text}
+                page.wait_for_timeout(250)
 
     return {"revealed": False, "field_count": _field_count(page), "clicked": None}
 
