@@ -66,19 +66,29 @@ RUN_LOCK = os.path.expanduser("~/.job-applier-worker.lock")
 # deciding whether to fill. See _is_fillable_url below for why.
 AGGREGATOR_SOURCES = {"himalayas", "remoteok", "jobicy"}
 
-# Domains where fill_form's field-matching actually applies. Confirmed
-# live 2026-09-03: the real decision has to be "what is this URL," not
-# "what source did this posting come from." submittability.py (ARCHITECTURE.md
-# §5) resolves an aggregator-sourced posting to a real employer ATS form
-# whenever it can find one, and generation now carries that resolved
-# `apply_url` through — but this file was still deciding "should I fill
-# this" from the application_id's source prefix alone, so a posting the
-# gate had already matched to a genuine, fillable jobs.ashbyhq.com URL
-# still got treated as "just open the listing," because "jobicy" was the
-# origin label. A posting whose source is `jobicy` but whose resolved URL
-# is a real Ashby form is exactly as fillable as one that started life on
-# Ashby; the origin stopped mattering the moment the gate resolved it.
-_FILLABLE_DOMAINS = ("jobs.ashbyhq.com", "job-boards.greenhouse.io", "jobs.lever.co")
+# Domains where fill_form's field-matching actually applies. Two
+# corrections live here, both the same lesson learned twice on
+# 2026-09-03: match on what's actually there, as loosely as is safe.
+#
+# First, the decision can't come from "what source did this posting come
+# from." submittability.py (ARCHITECTURE.md §5) resolves an
+# aggregator-sourced posting to a real employer ATS form whenever it can
+# find one, so a `jobicy` posting whose resolved URL is a genuine Ashby
+# form is exactly as fillable as one that started life on Ashby — the
+# origin stopped mattering the moment the gate resolved it.
+#
+# Second, these are registrable domains, not full subdomains, because
+# exact subdomains were wrong twice over: Fivetran proxies Greenhouse
+# through `www.fivetran.com/careers/job?gh_jid=...` (handled by checking
+# frame URLs — see _page_has_ats_frame), and TensorOps' board is
+# `job-boards.eu.greenhouse.io`, Greenhouse's EU region, which the
+# previous "job-boards.greenhouse.io" entry doesn't match as a substring
+# at all. Regional and per-tenant subdomains vary per employer and
+# there's no reason to enumerate them. Loose matching is safe because
+# this only decides whether to *attempt* a fill — _reveal_form's real
+# field count, and fill_form's own per-field matching, are what actually
+# gate the result.
+_FILLABLE_DOMAINS = ("ashbyhq.com", "greenhouse.io", "lever.co")
 
 
 def _is_fillable_url(url: str) -> bool:
