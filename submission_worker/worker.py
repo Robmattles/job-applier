@@ -295,73 +295,113 @@ def _match_field(descriptor: str):
     return None
 
 
-def _open_application_tab(page):
-    """Some employer career sites (confirmed live 2026-09-03: Airbnb's)
-    wrap the Greenhouse embed in their own "Role overview" / "Application"
-    tab layout, with the embed hidden — a zero bounding box, `is_visible`
-    False on every field inside it — until the "Application" tab is
-    clicked. Nothing about `job-boards.greenhouse.io/{co}/jobs/{id}`
-    signals which pattern a given employer uses; phData's page showed the
-    form immediately, Airbnb's doesn't, and there's no way to know in
-    advance which this one is. So: look for the tab, click it if present,
-    and do nothing if not — a plain redirect-and-show-the-form employer
-    page has no "Application" text for this to match, and a no-op click
-    attempt is harmless there."""
-    for sel in ("text=Application", "[role=tab]:has-text('Application')",
-                "button:has-text('Application')", "a:has-text('Application')"):
+_MIN_FIELDS_FOR_LOADED = 5  # see _field_count's docstring for why 5, not 1
+
+
+def _field_count(page) -> int:
+    """*Visible* input/textarea/select elements across every frame — the
+    is_visible() check is load-bearing, not decoration. Used as the "is a
+    real, usable form here yet" signal in place of a fixed sleep.
+
+    Confirmed live 2026-09-03, in two stages, both against the same
+    Airbnb page. First: a plain count of matching elements (visible or
+    not) is satisfied by furniture — Greenhouse's host page and the
+    reCAPTCHA iframe each carry one stray input before any actual embed
+    has loaded, so "at least one field exists somewhere in the DOM" is
+    true almost immediately and proves nothing. Second, dropping the
+    visibility check entirely and just counting *all* matching elements
+    (visible or not) looked like it fixed that — the real embed's ~30
+    fields clear any reasonable count threshold — but it was checking
+    the wrong thing in a different way: those 30 fields exist in the DOM
+    the whole time on Airbnb's page, hidden behind its "Application" tab
+    with a zero bounding box, so an existence count reports "loaded"
+    while every one of those fields is_visible() == False, and
+    fill_form's own per-field visibility check (correctly) then fills
+    none of them. "Exists in the DOM" and "is actually on screen and
+    fillable" are different claims, and only the second one is what this
+    function needs to answer."""
+    total = 0
+    for frame in page.frames:
         try:
-            el = page.query_selector(sel)
-        except Exception:  # noqa: BLE001
+            handles = frame.query_selector_all("input, textarea, select")
+        except Exception:  # noqa: BLE001 — a frame mid-navigation isn't fatal, just recount
             continue
-        if el and el.is_visible():
+        for h in handles:
             try:
-                el.click()
-            except Exception:  # noqa: BLE001 — not fatal; _wait_for_form below just won't find much
-                pass
-            return
+                if h.is_visible():
+                    total += 1
+            except Exception:  # noqa: BLE001
+                continue
+    return total
 
 
-def _wait_for_form(page, timeout_ms: int = 15000, min_fields: int = 5):
-    """Waits until the page has at least `min_fields` visible
-    input/textarea/select elements across all frames combined, rather
-    than a fixed sleep.
+# Confirmed live 2026-09-03: Airbnb's careers site wraps the Greenhouse
+# embed in its own "Role overview" / "Application" tab layout, with the
+# embed hidden (zero bounding box, every field inside reporting
+# is_visible() False) until "Application" is clicked. Nothing about the
+# URL, or the fact that it's Greenhouse, signals which pattern a given
+# employer uses — phData's page (the only other one tested) shows its
+# form immediately.
+#
+# "Application" was the first fix, and it was too narrow in a way that
+# would have failed exactly as silently for the next company: an
+# employer whose tab reads "Apply" or "Apply Now" doesn't contain the
+# substring "Application" at all, so a text-match tuned to one observed
+# case doesn't generalize on its own. This list is still finite and
+# still a guess about wording — the field-count check below it is what
+# actually keeps that guess honest, by trying each candidate in turn and
+# stopping the moment one demonstrably works rather than trusting any
+# single match blindly.
+_REVEAL_CANDIDATE_TEXTS = (
+    "Application", "Apply Now", "Apply for this Job", "Apply for this job",
+    "How to Apply", "Apply",
+)
 
-    Confirmed live 2026-09-03, in two stages. First: a plain
-    `wait_for_timeout(3000)` reported "filled: (none)" against a real
-    Airbnb Greenhouse application — the embed genuinely hadn't rendered
-    yet at the 3-second mark. Second, the first fix for that (wait for
-    *any* field, any frame) was itself wrong and looked like it worked
-    right up until it didn't: Greenhouse's host page carries its own
-    single stray input before the embed iframe finishes loading, and the
-    reCAPTCHA iframe carries one too — "at least one field exists
-    somewhere" is satisfied by either of those long before the real
-    ~30-field form does, so it returned early just the same, only a
-    little later than the fixed sleep had. A form worth calling "loaded"
-    has more than one or two fields; requiring a real count is what
-    actually distinguishes "the embed is here" from "a stray input on
-    the host page is here."
 
-    min_fields=5 is deliberately low relative to a typical Greenhouse
-    form (15-30 fields) — it only has to clear "this is obviously not
-    just the host page's furniture," not match the exact final count,
-    since fields can still be streaming in via React after this returns
-    and fill_form's own per-field visibility check handles that.
+def _reveal_form(page, timeout_ms: int = 15000) -> dict:
+    """Gets a hidden form on screen and reports whether it worked, rather
+    than assuming it did.
 
-    Falls through silently on timeout rather than raising — an
-    aggregator listing or a form that genuinely never renders shouldn't
-    crash the worker; fill_form on a sparse page just reports whatever
-    it can, same as it always could."""
+    Two passes. First, wait for fields to show up on their own — most
+    employer pages (phData, confirmed live) render the form directly and
+    need nothing clicked. Only if that first pass times out does this
+    try clicking through _REVEAL_CANDIDATE_TEXTS, checking the real field
+    count after each attempt and stopping the moment one crosses the
+    threshold — so it's not betting the whole result on one guessed
+    label, and it doesn't click around on a page that already worked.
+
+    Returns {"revealed": bool, "field_count": int, "clicked": str|None}.
+    The caller uses `revealed` to tell "genuinely no form here" (an
+    aggregator listing, say) apart from "there's a form and this didn't
+    find it" — a distinction the previous version of this code collapsed
+    into a single silent "filled: (none)," which is exactly the report
+    Matt got for a real, fillable Airbnb posting the first time."""
     deadline = time.time() + timeout_ms / 1000
     while time.time() < deadline:
-        total = 0
-        for frame in page.frames:
-            try:
-                total += len(frame.query_selector_all("input, textarea, select"))
-            except Exception:  # noqa: BLE001 — a frame mid-navigation isn't fatal, just recount
-                continue
-        if total >= min_fields:
-            return
+        count = _field_count(page)
+        if count >= _MIN_FIELDS_FOR_LOADED:
+            return {"revealed": True, "field_count": count, "clicked": None}
         page.wait_for_timeout(250)
+
+    for text in _REVEAL_CANDIDATE_TEXTS:
+        try:
+            el = page.query_selector(f"text={text}")
+        except Exception:  # noqa: BLE001
+            continue
+        if not el or not el.is_visible():
+            continue
+        try:
+            el.click()
+        except Exception:  # noqa: BLE001 — try the next candidate
+            continue
+        click_deadline = time.time() + 5
+        while time.time() < click_deadline:
+            count = _field_count(page)
+            if count >= _MIN_FIELDS_FOR_LOADED:
+                return {"revealed": True, "field_count": count, "clicked": text}
+            page.wait_for_timeout(250)
+
+    return {"revealed": False, "field_count": _field_count(page), "clicked": None}
 
 
 def fill_form(page, values: dict, documents: dict, dry_run: bool = False) -> dict:
@@ -666,8 +706,21 @@ def process_application(app: dict, dry_run: bool = False, auto: bool = True) -> 
         report = {"filled": [], "skipped_sensitive": [], "unmapped": [], "uploads": [],
               "skipped_autofill": [], "_open_questions": []}
         if fillable:
-            _open_application_tab(page)
-            _wait_for_form(page)
+            reveal = _reveal_form(page)
+            if reveal["clicked"]:
+                print(f"  (form was hidden behind a '{reveal['clicked']}' tab/button — clicked it)")
+            if not reveal["revealed"]:
+                # This is the case the old code silently collapsed into
+                # "filled: (none)," indistinguishable from a genuine
+                # aggregator listing with nothing to fill. It's a real
+                # form (submittability/the URL domain already say so) —
+                # something about revealing it just didn't match anything
+                # this worker knows to try. Surfaced loudly rather than
+                # reported as if it were simply empty.
+                print(f"\n  WARNING: this should be a real form ({url}) but only "
+                      f"{reveal['field_count']} field(s) are visible — the form may be hidden "
+                      "behind something this worker doesn't know how to reveal yet. Check the "
+                      "browser window before trusting what's below.")
             report = fill_form(page, values, documents, dry_run=dry_run)
 
         print("\n  filled:")
