@@ -196,8 +196,24 @@ Respond with ONLY a JSON object, no markdown fences, no other text, with exactly
 }"""
 
 
-def _build_user_prompt(posting: dict, inventory: dict, career_facts: dict) -> str:
+def _build_cached_prefix(inventory: dict, career_facts: dict) -> str:
+    """The half of the scoring prompt that is identical for every posting.
+
+    Kept separate, and sent first, so it can carry a cache_control
+    breakpoint — see bedrock_client.invoke_json. Nothing posting-specific
+    may leak in here: caching is prefix-based, so a single varying byte
+    invalidates the whole thing and silently returns to full price."""
     records = inventory_store.compact_records(inventory)
+    return f"""CANDIDATE CAREER FACTS (degrees and coursework included — formal training in a subject is
+real evidence of capability in it, not a footnote):
+{career_facts}
+
+CANDIDATE ACCOMPLISHMENT INVENTORY ({len(records)} records):
+{records}"""
+
+
+def _build_posting_prompt(posting: dict) -> str:
+    """The posting-specific half, sent after the cached prefix."""
     remote_note = ""
     if posting.get("remote_status") == "ambiguous":
         remote_note = (
@@ -213,20 +229,17 @@ Company: {posting.get('company_name', posting.get('company_slug', ''))}
 Description:
 {posting.get('description', '(no description available)')[:8000]}
 
-CANDIDATE CAREER FACTS (degrees and coursework included — formal training in a subject is
-real evidence of capability in it, not a footnote):
-{career_facts}
-
-CANDIDATE ACCOMPLISHMENT INVENTORY ({len(records)} records):
-{records}
+Score this posting against the candidate evidence above.
 
 Also check: does the posting state a compensation figure (base or total)? If so, is it at \
 or above ${COMP_FLOOR:,}? Set comp_meets_floor accordingly (null if no figure is stated at all)."""
 
 
 def _score_posting(posting: dict, inventory: dict, career_facts: dict) -> dict:
-    user_prompt = _build_user_prompt(posting, inventory, career_facts)
-    return bedrock_client.invoke_json(MODEL_ID, SYSTEM_PROMPT, user_prompt)
+    return bedrock_client.invoke_json(
+        MODEL_ID, SYSTEM_PROMPT, _build_posting_prompt(posting),
+        cached_prefix=_build_cached_prefix(inventory, career_facts),
+    )
 
 
 def _scan_by_status(status: str, limit: int = None):

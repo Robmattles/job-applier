@@ -60,6 +60,34 @@ def load_weekly_cap(default: int) -> int:
         return default
 
 
+def load_cap_reset_at() -> int:
+    """`cap_reset_at` in config/ramp.json: approval emails sent at or
+    before this epoch don't count toward the weekly cap.
+
+    The cap bounds *how much review lands on Matt*. A day spent proving
+    the pipeline works spends that budget without ever costing him
+    review — 2026-09-03 sent 25 emails, most of which Gmail spam-filtered
+    so he never saw them, and the handful he did engage with were
+    debugging exercises rather than real hiring decisions. Zeroing the
+    counter by deleting or backdating those rows would corrupt the audit
+    trail (and marking them WITHDRAWN would silently break replies to
+    the ones still open), so instead this records an explicit "start
+    counting here" line, kept alongside the cap's own change history.
+
+    Read uncached, like the kill switch and for the same reason: it's
+    flipped in the moment you want it to take effect."""
+    try:
+        s3 = boto3.client("s3")
+        obj = s3.get_object(
+            Bucket=os.environ["DOCUMENTS_BUCKET"],
+            Key=os.environ.get("RAMP_CONFIG_KEY", "config/ramp.json"),
+        )
+        return int(json.loads(obj["Body"].read().decode("utf-8")).get("cap_reset_at", 0) or 0)
+    except Exception as e:  # noqa: BLE001
+        print(f"cap_reset_at unreadable ({e}); counting the full window")
+        return 0
+
+
 def is_paused() -> bool:
     """The §5 kill switch: `"paused": true` in `config/ramp.json` halts
     ingestion and everything outbound, instantly and with no deploy.

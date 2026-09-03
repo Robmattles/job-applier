@@ -97,6 +97,8 @@ def _emails_sent_since(epoch: int) -> int:
     him* against work that never reached him at all. Everything he
     actually saw and could act on still counts, including ones he said
     no to."""
+    # A cap reset moves the floor forward — see load_cap_reset_at.
+    epoch = max(epoch, inventory_store.load_cap_reset_at())
     rows = scan_all(_pending(), FilterExpression=Attr("sent_at").gte(epoch))
     return len([r for r in rows if r.get("status") != "WITHDRAWN"])
 
