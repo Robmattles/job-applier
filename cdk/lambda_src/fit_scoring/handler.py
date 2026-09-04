@@ -204,7 +204,9 @@ def _build_cached_prefix(inventory: dict, career_facts: dict) -> str:
     may leak in here: caching is prefix-based, so a single varying byte
     invalidates the whole thing and silently returns to full price."""
     records = inventory_store.compact_records(inventory)
-    return f"""CANDIDATE CAREER FACTS (degrees and coursework included — formal training in a subject is
+    return f"""{inventory_store.capability_boundaries(inventory)}
+
+CANDIDATE CAREER FACTS (degrees and coursework included — formal training in a subject is
 real evidence of capability in it, not a footnote):
 {career_facts}
 

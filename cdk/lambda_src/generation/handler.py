@@ -173,6 +173,8 @@ Chosen lane: {lane}
 Description:
 {posting.get('description', '(no description available)')[:8000]}
 
+{inventory_store.capability_boundaries(inventory)}
+
 CAREER-SUMMARY FACTS (Matt-confirmed aggregate facts, not tied to any one project — safe to
 cite directly in the summary or cover letter, e.g. total years of experience; these don't need
 a source_record_ids citation the way project bullets do):

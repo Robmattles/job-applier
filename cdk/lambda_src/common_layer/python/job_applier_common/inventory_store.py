@@ -134,6 +134,26 @@ def halt_if_paused(what: str) -> bool:
     return False
 
 
+def capability_boundaries(inventory: dict) -> str:
+    """Renders meta.capability_boundaries for a prompt, or "" if unset.
+
+    The absence of evidence is not a signal a generator reads reliably —
+    given a posting asking for something the inventory doesn't cover, it
+    reaches for the nearest adjacent record and relabels it rather than
+    concluding the candidate doesn't match. Confirmed live 2026-09-04
+    twice over: graduate coursework became a "Causal Inference" headline,
+    and a Redshift workload-management change became "end-to-end
+    experimentation infrastructure... exactly the experimentation backbone
+    the posting describes." Stating the boundaries positively is what
+    makes them visible; a missing tag never was."""
+    b = (inventory.get("meta", {}) or {}).get("capability_boundaries") or {}
+    lines = [v for k, v in b.items() if not k.startswith("_") and isinstance(v, str)]
+    if not lines:
+        return ""
+    return "THINGS THIS CANDIDATE HAS NOT DONE (never claim, never relabel adjacent work as):\n" + \
+           "\n".join(f"- {t}" for t in lines)
+
+
 def compact_records(inventory: dict, lane: str = None, include_role: bool = False) -> list:
     """Strip inventory records to what a prompt needs, dropping `source`
     (the grounding-QA pass's traceability field, not needed by any
