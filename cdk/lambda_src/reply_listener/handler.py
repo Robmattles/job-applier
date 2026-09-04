@@ -52,6 +52,16 @@ from job_applier_common import inventory_store
 from job_applier_common.dynamo_utils import scan_all
 
 IMAP_HOST = os.environ.get("IMAP_HOST", "imap.gmail.com")
+# Confirmed live 2026-09-04, and it cost 8 hours of silence: with no
+# timeout, a dropped connection doesn't raise — imaplib blocks on the
+# socket read forever. Matt's laptop slept mid-search, the TCP connection
+# died, and the local watcher (which calls this same handler in-process)
+# sat wedged all night: still running, launchd reporting it healthy, its
+# log frozen on "searching [Gmail]/All Mail" with no completing line.
+# Because the process never exits, KeepAlive can't restart it either — a
+# hang is strictly worse than a crash here. A timeout converts it into an
+# exception the callers already handle and retry on the next tick.
+IMAP_TIMEOUT = int(os.environ.get("IMAP_TIMEOUT_SECONDS", "45"))
 GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
 GMAIL_SECRET_ID = os.environ["GMAIL_SECRET_ID"]
 SUBMISSION_QUEUE_URL = os.environ["SUBMISSION_QUEUE_URL"]
@@ -288,7 +298,7 @@ def handler(event, context):
         print("no approvals awaiting a decision")
         return stats
 
-    imap = imaplib.IMAP4_SSL(IMAP_HOST)
+    imap = imaplib.IMAP4_SSL(IMAP_HOST, timeout=IMAP_TIMEOUT)
     try:
         imap.login(GMAIL_ADDRESS, _gmail_password())
         mailbox = _select_all_mail(imap)

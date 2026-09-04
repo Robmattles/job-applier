@@ -62,6 +62,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
 import boto3
@@ -238,6 +239,44 @@ def check_once(applications) -> int:
     return len(pending)
 
 
+_last_tick = time.time()
+_WATCHDOG_TIMEOUT = int(os.environ.get("JOB_APPLIER_WATCHDOG_SECONDS", "300"))
+
+
+def _heartbeat():
+    global _last_tick
+    _last_tick = time.time()
+
+
+def _start_watchdog():
+    """Force-exits the process if a tick ever wedges, so launchd restarts it.
+
+    Confirmed live 2026-09-04: the watcher spent 8 hours alive but frozen.
+    Matt's laptop slept mid-IMAP-search, the TCP connection died without
+    raising, and imaplib blocked on the socket read indefinitely — process
+    running, `launchctl list` reporting it healthy, log frozen on
+    "searching [Gmail]/All Mail". He replied "ok" and no browser opened.
+
+    A socket timeout on the IMAP connection (reply_listener.IMAP_TIMEOUT)
+    fixes that specific hang, but the general problem is that KeepAlive
+    only restarts a process that *exits* — a hang is invisible to it, and
+    strictly worse than a crash. This thread is the backstop for any future
+    wedge, wherever it happens: it runs independently of the blocked main
+    loop, so it still fires when the loop cannot.
+
+    os._exit rather than sys.exit deliberately — sys.exit only raises in
+    this thread, which the wedged main thread would never notice."""
+    def _watch():
+        while True:
+            time.sleep(30)
+            stalled = time.time() - _last_tick
+            if stalled > _WATCHDOG_TIMEOUT:
+                print(f"WATCHDOG: no completed tick in {stalled:.0f}s — exiting so launchd restarts")
+                sys.stdout.flush()
+                os._exit(1)
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="watch for approved applications and open the form")
     ap.add_argument("--once", action="store_true", help="check once and exit")
@@ -253,14 +292,17 @@ def main() -> int:
         return 0
 
     print(f"watching Gmail + approved applications every {POLL_SECONDS}s (mode={MODE}); ctrl-C to stop")
+    _start_watchdog()
     while True:
         try:
             check_once(applications)
+            _heartbeat()
         except Exception as e:  # noqa: BLE001
             # A watcher that dies on a transient AWS error is a watcher
             # that silently stops watching — which is how an approval
             # goes unnoticed for a week.
             print(f"check failed ({type(e).__name__}: {e}); retrying next tick")
+            _heartbeat()  # it failed, but it's alive and looping — not wedged
         time.sleep(POLL_SECONDS)
 
 
