@@ -84,6 +84,35 @@ Hard rules:
   bullet from it, unless you can honestly say none of that role's evidence applies to this
   specific posting — the correct number for a role that legitimately has nothing relevant
   is zero, but zero must be a real judgment, not a default.
+- The headline describes the candidate as they ACTUALLY ARE, not as the posting wishes.
+  It may name capability and domain ("Machine Learning Engineer | Entity Resolution at
+  Scale"), but it must never assert a seniority level or title the candidate has not
+  actually held. The titles held are in meta.role_history — currently topping out at
+  Senior Data Scientist. Confirmed live 2026-09-04, Matt: "I don't like how frequently the
+  top line of my resume deviates from my experience." Generated headlines were simply
+  restating the target job's own title back at it — "Principal AI Solutions Architect" for
+  a Principal posting, "Senior Staff Machine Learning Engineer" for a Staff one, "Staff
+  Data Scientist" for a Staff DS one. That is a seniority overclaim in the single most
+  prominent line of the document, and "tailored to this posting" was the instruction
+  producing it. Tailor the emphasis, never the rank.
+- Education is education. Degrees and coursework in the career-summary facts establish
+  formal training, and may be described as such — they never become a claimed professional
+  competency, a headline theme, or evidence of having practiced something on the job.
+  Confirmed live 2026-09-04: a single coursework line ("Experimental Design Principles &
+  Causal Inference") became the headline "Senior Data Scientist | Experimentation & Causal
+  Inference | Networked Systems," implying professional causal-inference work the candidate
+  has never done — his only exposure is graduate school. If the inventory holds no record
+  of practicing something, it does not belong in the headline or the summary, whatever the
+  posting asks for.
+- The support/maintenance rule above applies to the headline, summary, and cover letter
+  exactly as it does to bullets. A record qualified in its own text ("a supporting role,
+  not the original design or build") cannot become a headline theme or a summary claim.
+  Confirmed live 2026-09-04, Matt: "nicb assistant keeps popping up even though I had
+  little to do with that." That record — explicitly support-only, priority 3 — was driving
+  the headline in 14 of 60 applications and the summary in 23, because the honest framing
+  was enforced only inside bullets. Being the candidate's only substantial record in a
+  capability the posting wants is not a reason to promote it; it is a reason to be honest
+  that the capability is thin.
 - Do NOT write a "skills_section" — that is computed separately from the actual inventory
   tags, not from what you write. Leave that key out of your response entirely.
 - The cover letter must reference specifics from the actual posting (company, team,
@@ -105,7 +134,7 @@ records from more than one role, use the role of whichever record it leans on mo
 
 Respond with ONLY a JSON object, no markdown fences, no other text, with exactly these keys:
 {
-  "headline": "<one line, tailored to this posting and lane>",
+  "headline": "<one line — real seniority, capability tailored to the posting; never the posting's own title>",
   "summary": "<2-4 sentence professional summary, tailored to this posting>",
   "resume_bullets": [
     {"text": "<bullet prose>", "source_record_ids": ["<id>", "..."], "role": "<exact role string from the record(s) cited>"}
