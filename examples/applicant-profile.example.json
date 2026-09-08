@@ -1,0 +1,39 @@
+{
+  "_meta": {
+    "classification_rule": "SAFE_AUTOFILL = exact known answer. GENERATE_GROUNDED = open-ended, drafted from the inventory and grounding-checked. NEEDS_REVIEW = legally meaningful, identity-related, or unsupported \u2014 a human answers these, never the model."
+  },
+  "identity": {
+    "full_name": "Jane Example",
+    "email": "you@example.com",
+    "phone": "555-000-0000",
+    "city": "Springfield",
+    "state": "IL",
+    "zip_code": "00000"
+  },
+  "experience_summary": {
+    "total_years_professional_experience": 10,
+    "years_data_science_ml": 6,
+    "_inferred": "years_data_science_ml is inferred from title history; reasonable people could count it as 4.",
+    "education": [
+      {
+        "degree": "M.S. Data Science",
+        "school": "State University",
+        "coursework": "Experimental Design Principles & Causal Inference"
+      }
+    ],
+    "notable_certifications": [
+      "Cloud ML Specialty"
+    ]
+  },
+  "voluntary_self_identification": {
+    "_note": "Decline-by-default. Never auto-filled with a guess, never LLM-generated.",
+    "gender": "decline",
+    "ethnicity": "decline",
+    "veteran_status": "decline",
+    "disability": "decline"
+  },
+  "compensation": {
+    "_note": "NEEDS_REVIEW \u2014 never auto-filled.",
+    "floor_usd": 130000
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "records_are_evidence_not_output": "Records are atomic evidence, not resume bullets. Generation combines, splits, or drops them per posting; it never emits them verbatim.",
+    "authorship_verification_caveat": "Records derived from commit activity can overstate ownership. Anything you did not personally design should say so in its own text \u2014 the generator honors that framing.",
+    "role_history": [
+      {
+        "role": "Acme Corp \u2014 Senior Data Scientist (Jan 2021-present)",
+        "neutral_description": "Senior data scientist working on fraud detection and entity resolution."
+      },
+      {
+        "role": "Previous Co \u2014 Data Analyst (2018-2021)",
+        "neutral_description": "Analytics and reporting for operations teams."
+      }
+    ],
+    "capability_boundaries": {
+      "_why": "Things the candidate has NOT done. Recorded explicitly because absence of a record is not a signal a generator reads \u2014 it will reach for adjacent evidence and relabel it to match a posting unless told not to.",
+      "no_professional_causal_inference": "Exposure is graduate coursework only. Never present as a professional competency or headline theme."
+    }
+  },
+  "records": [
+    {
+      "id": "acme-entity-resolution",
+      "role": "Acme Corp \u2014 Senior Data Scientist (Jan 2021-present)",
+      "text": "Designed and shipped an entity-resolution system over ~50M records, hitting explicit precision/recall targets under a fixed monthly infrastructure budget.",
+      "metrics": [
+        "~50M records",
+        "P0.95 / R0.97"
+      ],
+      "skills": [
+        "Python",
+        "Spark",
+        "DuckDB"
+      ],
+      "lanes": [
+        "senior_ds",
+        "applied_mle"
+      ],
+      "capability_tags": [
+        "ml_modeling",
+        "production_ownership"
+      ],
+      "priority": 1,
+      "source": "career-notes.md \u00a72"
+    },
+    {
+      "id": "acme-monitoring",
+      "role": "Acme Corp \u2014 Senior Data Scientist (Jan 2021-present)",
+      "text": "Provided ongoing maintenance and support for a production model-monitoring service \u2014 a supporting role, not the original design or build.",
+      "metrics": [],
+      "skills": [
+        "Python"
+      ],
+      "lanes": [
+        "applied_mle"
+      ],
+      "capability_tags": [
+        "production_ownership"
+      ],
+      "priority": 3,
+      "source": "career-notes.md \u00a75 \u2014 support only, do not upgrade to 'built'"
+    }
+  ]
+}
