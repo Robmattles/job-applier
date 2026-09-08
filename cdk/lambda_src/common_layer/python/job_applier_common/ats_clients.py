@@ -12,7 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-USER_AGENT = "job-applier/1.0 (personal automation; contact: you@example.com)"
+USER_AGENT = "job-applier/1.0 (personal automation; contact: see repository)"
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t]+")

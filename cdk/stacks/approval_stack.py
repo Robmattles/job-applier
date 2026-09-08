@@ -13,6 +13,7 @@ This is the human gate the whole pipeline exists to feed: everything
 upstream is reversible bookkeeping, everything downstream (§6 phase 7)
 sends real applications to real employers under Matt's name.
 """
+import os
 import aws_cdk as cdk
 from aws_cdk import (
     Duration,
@@ -29,7 +30,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-APPROVAL_EMAIL = "you@example.com"
+APPROVAL_EMAIL = os.environ.get("JOB_APPLIER_EMAIL", "you@example.com")
 GMAIL_SECRET_NAME = "job-applier-gmail-app-password"
 
 

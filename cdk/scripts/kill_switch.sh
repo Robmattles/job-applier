@@ -20,7 +20,8 @@
 # the pause stranded once you turn it off again.
 set -euo pipefail
 PROFILE=${AWS_PROFILE:-job-applier}
-BUCKET=job-applier-documents-ACCOUNT_ID-us-east-1
+source "$(dirname "$0")/../../.env.local" 2>/dev/null || true
+BUCKET=job-applier-documents-${JOB_APPLIER_ACCOUNT_ID:?set it in .env.local}-${JOB_APPLIER_REGION:-us-east-1}
 KEY=config/ramp.json
 TMP=$(mktemp -t ramp)
 trap 'rm -f "$TMP" "$TMP.new"' EXIT

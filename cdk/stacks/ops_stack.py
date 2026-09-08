@@ -9,6 +9,7 @@
   question of whether the weekly cap has earned a raise.
 - A billing alarm, per §5's cost ceiling.
 """
+import os
 import aws_cdk as cdk
 from aws_cdk import (
     Duration,
@@ -23,7 +24,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-APPROVAL_EMAIL = "you@example.com"
+APPROVAL_EMAIL = os.environ.get("JOB_APPLIER_EMAIL", "you@example.com")
 
 
 class OpsStack(Stack):

@@ -4,3 +4,35 @@ __pycache__/
 *.pyc
 # Abandoned Gmail OAuth path (ARCHITECTURE.md §3 switched to IMAP + App Password)
 client_secret_*.apps.googleusercontent.com.json
+
+# ---------------------------------------------------------------------
+# Personal and employer data — deliberately not published.
+#
+# This repo is public for the pipeline architecture. The data it runs on
+# is Matt's actual career record and, in the NICB material, his
+# employer's internal systems (warehouse architecture, accuracy targets,
+# production incidents, carrier pilots). None of that is needed to
+# understand or run the code, and publishing an employer's internals
+# under your own name is a different risk from publishing your own phone
+# number. Templates with the same shape ship in examples/ instead.
+#
+# Everything here is still in your local working tree — ignored, not
+# deleted.
+# ---------------------------------------------------------------------
+accomplishment-inventory.json
+applicant-profile.json
+career-history.md
+nicb-resume-info.md
+calibration-set.md
+.calibration-key.json
+dry-run-recruiter-review.md
+sample-resume-applied-ai.md
+sample-resume-senior-ds.md
+verification-checklist.md
+target-employer-list.md
+setup-runbook.md
+HANDOFF.md
+*.docx
+*.pdf
+
+.env.local

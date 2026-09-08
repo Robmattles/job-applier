@@ -68,6 +68,7 @@ import time
 import boto3
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import localconfig  # noqa: E402
 from worker import (  # noqa: E402
     APPLICATIONS_TABLE,
     RUN_LOCK,
@@ -76,10 +77,10 @@ from worker import (  # noqa: E402
 
 REGION = "us-east-1"
 PROFILE = os.environ.get("AWS_PROFILE", "job-applier")
-DOCUMENTS_BUCKET = "job-applier-documents-ACCOUNT_ID-us-east-1"
+DOCUMENTS_BUCKET = localconfig.DOCUMENTS_BUCKET
 PENDING_APPROVALS_TABLE = "job-applier-pending-approvals"
-SUBMISSION_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/job-applier-submission-queue"
-GMAIL_ADDRESS = "you@example.com"
+SUBMISSION_QUEUE_URL = localconfig.SUBMISSION_QUEUE_URL
+GMAIL_ADDRESS = localconfig.EMAIL
 GMAIL_SECRET_NAME = "job-applier-gmail-app-password"
 
 # 15s, not 30s: a 30s POLL_SECONDS gives a 30s *average* wait, not a 30s

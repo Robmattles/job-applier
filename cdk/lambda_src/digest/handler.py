@@ -123,9 +123,9 @@ def handler(event, context):
         "most applications stalled in NEEDS_REVIEW is a week to leave it alone.",
         "",
         "To change it (takes effect on the next scoring run, no deploy):",
-        "  aws s3 cp s3://job-applier-documents-ACCOUNT_ID-us-east-1/config/ramp.json - \\",
+        "  aws s3 cp s3://job-applier-documents-<ACCOUNT_ID>-us-east-1/config/ramp.json - \\",
         "    --profile job-applier | sed 's/\"weekly_cap\": [0-9]*/\"weekly_cap\": 15/' | \\",
-        "    aws s3 cp - s3://job-applier-documents-ACCOUNT_ID-us-east-1/config/ramp.json \\",
+        "    aws s3 cp - s3://job-applier-documents-<ACCOUNT_ID>-us-east-1/config/ramp.json \\",
         "    --profile job-applier",
     ]
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+
 import aws_cdk as cdk
 
 from stacks.approval_stack import ApprovalStack
@@ -13,8 +15,13 @@ from stacks.scoring_stack import ScoringStack
 app = cdk.App()
 
 # Explicit account/region rather than relying on ambient profile env vars —
-# ARCHITECTURE.md settled on account ACCOUNT_ID, region us-east-1.
-env = cdk.Environment(account="ACCOUNT_ID", region="us-east-1")
+# Account/region come from .env.local (see .env.example) rather than
+# being hardcoded, so this repo can be public without naming one
+# person's live infrastructure.
+env = cdk.Environment(
+    account=os.environ.get("JOB_APPLIER_ACCOUNT_ID") or os.environ["CDK_DEFAULT_ACCOUNT"],
+    region=os.environ.get("JOB_APPLIER_REGION", "us-east-1"),
+)
 
 foundation = FoundationStack(
     app,

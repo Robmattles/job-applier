@@ -49,11 +49,13 @@ import time
 
 import boto3
 
+import localconfig
+
 PROFILE = os.environ.get("AWS_PROFILE", "job-applier")
 REGION = "us-east-1"
-QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/job-applier-submission-queue"
+QUEUE_URL = localconfig.SUBMISSION_QUEUE_URL
 APPLICATIONS_TABLE = "job-applier-applications"
-DOCUMENTS_BUCKET = "job-applier-documents-ACCOUNT_ID-us-east-1"
+DOCUMENTS_BUCKET = localconfig.DOCUMENTS_BUCKET
 PROFILE_KEY = "source/applicant-profile.json"
 RAMP_CONFIG_KEY = "config/ramp.json"
 
