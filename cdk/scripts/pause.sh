@@ -46,15 +46,27 @@ case "${1:-status}" in
 
   on)
     "$HERE/kill_switch.sh" on
-    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    # Uninstall, don't just bootout. Confirmed 2026-10-01: `bootout` only
+    # unloads for the current session, and the plist sets RunAtLoad=true —
+    # so every login resurrected the watcher. Three weeks later there were
+    # three of them running at once. They were harmlessly no-opping on the
+    # kill switch, but "paused" has to survive a reboot, and three watchers
+    # racing to launch browsers is exactly the duplicate-launch bug the
+    # per-application cooldown exists to prevent.
+    "$HERE/../../submission_worker/install-watcher.sh" uninstall >/dev/null 2>&1 || true
     pkill -f 'submission_worker/watcher.py' 2>/dev/null || true
-    echo "watcher stopped."
+    sleep 1
+    pkill -9 -f 'submission_worker/watcher.py' 2>/dev/null || true
+    echo "watcher uninstalled (survives reboot)."
     # Bound CloudWatch growth. Every log group defaulted to never-expire;
     # tiny today (~1.3MB) but it only goes one direction, and a paused
     # system is exactly when nobody notices.
+    # Needs logs:DescribeLogGroups, which the scoped policy doesn't grant —
+    # this was a one-time fix applied under admin on 2026-09-08 and is a
+    # no-op afterwards, so a failure here is expected and not worth noise.
     for lg in $(aws logs describe-log-groups --region us-east-1 --profile "$PROFILE" \
                   --log-group-name-prefix /aws/lambda/job-applier \
-                  --query 'logGroups[?retentionInDays==`null`].logGroupName' --output text); do
+                  --query 'logGroups[?retentionInDays==`null`].logGroupName' --output text 2>/dev/null || true); do
       aws logs put-retention-policy --region us-east-1 --profile "$PROFILE" \
         --log-group-name "$lg" --retention-in-days 30 && echo "  log retention 30d: $lg"
     done
